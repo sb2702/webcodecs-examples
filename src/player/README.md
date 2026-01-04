@@ -283,10 +283,16 @@ player.on('terminated', () => {
 - Decoded with Web Audio API (hardware accelerated)
 - Chunked loading prevents memory issues with long videos
 
+### Clock Timing
+- Clock runs at 30fps via requestAnimationFrame
+- Audio timeline (AudioContext.currentTime) provides sub-millisecond precision
+- Frame rate throttling prevents excessive rendering and saves CPU/battery
+- Main thread handles Clock loop, audio playback, and UI updates
+
 ### Worker Threading
 - File demuxing in dedicated worker (non-blocking)
 - Video decoding in dedicated worker (non-blocking)
-- Main thread only handles audio playback and UI updates
+- Main thread only handles Clock, audio playback, and UI updates
 
 ## Browser Support
 
