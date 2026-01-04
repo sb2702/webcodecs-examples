@@ -102,8 +102,7 @@ export class WebAudioPlayer extends EventEmitter {
 
 
 
-        const chunks = <EncodedAudioChunk[]> await this.worker.sendMessage('get-track-segment', {
-            type: 'audio',
+        const chunks = <EncodedAudioChunk[]> await this.worker.sendMessage('get-audio-segment', {
             start: chunkIndex*CHUNK_DURATION,
             end: chunkIndex*CHUNK_DURATION + CHUNK_DURATION,
             file: this.file

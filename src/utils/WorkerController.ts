@@ -46,7 +46,7 @@ export class WorkerController {
   }
 
   private handleWorkerMessage(event: MessageEvent<WorkerResponse>): void {
-  
+
     if (this.listeners[event.data.request_id]) {
       this.listeners[event.data.request_id](event.data.res);
 

@@ -1,7 +1,6 @@
-import {MP4Demuxer} from 'webcodecs-utils';
+import VideoRenderer, { VideoTrackData } from "./decoder";
 
-
-// Types and functions imported from file.ts
+// Types
 interface TrackData {
   duration: number;
   audio?: AudioTrackData;
@@ -14,25 +13,14 @@ interface AudioTrackData {
   numberOfChannels: number;
 }
 
+// Connection to file worker
+let fileWorkerPort: MessagePort | null = null;
 
-
-interface MP4Data {
-  mp4: any;
-  trackData: TrackData;
-  info: any;
-}
-
-
-
-
-// Active ChunkedVideoManager
+// Active video transformer
 let videoManager: VideoTransformer | null = null;
 
 // The canvas we'll render to
 let offscreenCanvas: OffscreenCanvas | null = null;
-
-
-import VideoRenderer, { VideoTrackData } from "./decoder";
 
 // Same chunk duration as used in audio
 const CHUNK_DURATION = 10; // Duration of each chunk in seconds
@@ -42,17 +30,16 @@ const CHUNK_DURATION = 10; // Duration of each chunk in seconds
  * Each VideoRenderer is responsible for rendering frames from its own chunk
  */
 export default class VideoTransformer {
-    private videoMetadata: | undefined;
-    private file: File;
+    private videoMetadata: VideoTrackData | undefined;
     private duration: number | undefined;
     private canvas: OffscreenCanvas;
-    
+    private filePort: MessagePort;
+
     // Map of chunk index to VideoRenderer
     private renderers: Map<number, VideoRenderer>;
-    public demuxer: MP4Demuxer;
     // Cached chunks data
     private loadedChunks: Map<number, EncodedVideoChunk[]>;
-    
+
     // Current state
     private currentChunkIndex: number;
     private activeRenderer: VideoRenderer | null;
@@ -61,16 +48,21 @@ export default class VideoTransformer {
     private rendering: boolean;
     private lastRenderedTime: number;
 
+    // Request ID tracking
+    private requestId: number = 0;
+    private pendingRequests: Map<number, { resolve: (value: any) => void, reject: (error: any) => void }> = new Map();
+
     constructor(
         canvas: OffscreenCanvas,
-        file: File
+        filePort: MessagePort,
+        videoMetadata: VideoTrackData,
+        duration: number
     ) {
-
         this.canvas = canvas;
-        this.file = file;
+        this.filePort = filePort;
+        this.videoMetadata = videoMetadata;
+        this.duration = duration;
         this.renderers = new Map();
-        this.demuxer = new MP4Demuxer(file);
-
         this.loadedChunks = new Map();
         this.currentChunkIndex = -1;
         this.activeRenderer = null;
@@ -78,16 +70,42 @@ export default class VideoTransformer {
         this.preloadThreshold = 5; // Seconds before chunk end to trigger preload
         this.rendering = false;
         this.lastRenderedTime = 0;
-        
 
+        // Set up message handler for file worker responses
+        this.filePort.onmessage = this.handleFileWorkerMessage.bind(this);
+    }
+
+    private handleFileWorkerMessage(event: MessageEvent) {
+        const { cmd, request_id, data, error } = event.data;
+
+        if (cmd === 'chunks' && request_id) {
+            const pending = this.pendingRequests.get(request_id);
+            if (pending) {
+                if (error) {
+                    pending.reject(new Error(error));
+                } else {
+                    pending.resolve(data);
+                }
+                this.pendingRequests.delete(request_id);
+            }
+        }
+    }
+
+    private requestSegment(start: number, end: number): Promise<EncodedVideoChunk[]> {
+        return new Promise((resolve, reject) => {
+            const id = ++this.requestId;
+            this.pendingRequests.set(id, { resolve, reject });
+
+            this.filePort.postMessage({
+                cmd: 'request-segment',
+                request_id: id,
+                data: { start, end }
+            });
+        });
     }
 
     async initialize(){
         // Initialize with the first chunk
-
-        await this.demuxer.load();
-        this.videoMetadata = this.demuxer.getVideoTrack();
-      
         await this.initializeChunk(0);
         await this.seek(0);
     }
@@ -100,7 +118,7 @@ export default class VideoTransformer {
     }
 
     /**
-     * Load a specific chunk from the worker
+     * Load a specific chunk from the file worker
      */
     private async loadChunk(chunkIndex: number): Promise<EncodedVideoChunk[]> {
         // If already loaded, return from cache
@@ -112,14 +130,12 @@ export default class VideoTransformer {
         const endTime = Math.min((chunkIndex + 1) * CHUNK_DURATION, this.duration);
 
         try {
-
-            
-            const chunks = <EncodedVideoChunk[]> await this.demuxer.extractSegment('video', startTime, endTime);
-
+            // Request chunks from file worker via MessagePort
+            const chunks = await this.requestSegment(startTime, endTime);
 
             // Cache the chunks
             this.loadedChunks.set(chunkIndex, chunks);
-            
+
             return chunks;
         } catch (error) {
             console.error('Error loading video chunk:', error);
@@ -323,28 +339,17 @@ self.onmessage = async function(event: MessageEvent) {
   switch (cmd) {
     case "init":
       try {
-        // Get the transferred canvas
+        // Get the transferred canvas and file worker port
         offscreenCanvas = data.canvas;
-        const file = data.file;
-        
-    
+        fileWorkerPort = data.fileWorkerPort;
 
-        // Create the video manager with the offscreen canvas
-        transformer = new VideoTransformer(
-          offscreenCanvas as OffscreenCanvas, // Cast to HTMLCanvasElement
-          file
-        );
+        if (!offscreenCanvas || !fileWorkerPort) {
+          throw new Error('Missing canvas or file worker port');
+        }
 
+        console.log("Video worker initialized with MessagePort to file worker");
 
-        console.log("Initializing video manager", videoManager);
-        await transformer.initialize();
-        console.log("Video manager initialized", videoManager);
-
-
-        console.log("Sending initialization message", videoManager);
-
-        console.log("Sending initialization message", request_id);
-        // Send successful initialization
+        // Send successful initialization (video transformer will be created after track data is received)
         self.postMessage({
           request_id,
           res: true
@@ -353,6 +358,44 @@ self.onmessage = async function(event: MessageEvent) {
         self.postMessage({
           request_id,
           error: `Initialization error: ${error}`
+        });
+      }
+      break;
+
+    case "set-track-data":
+      try {
+        // Receive video metadata and duration from main thread
+        const { videoMetadata, duration } = data;
+
+        if (!offscreenCanvas || !fileWorkerPort) {
+          throw new Error('Worker not initialized');
+        }
+
+        // Set canvas dimensions
+        if (videoMetadata.codedWidth && videoMetadata.codedHeight) {
+          offscreenCanvas.width = videoMetadata.codedWidth;
+          offscreenCanvas.height = videoMetadata.codedHeight;
+        }
+
+        // Create the video transformer with the file worker port
+        transformer = new VideoTransformer(
+          offscreenCanvas,
+          fileWorkerPort,
+          videoMetadata,
+          duration
+        );
+
+        await transformer.initialize();
+        console.log("Video transformer initialized");
+
+        self.postMessage({
+          request_id,
+          res: true
+        });
+      } catch (error) {
+        self.postMessage({
+          request_id,
+          error: `Set track data error: ${error}`
         });
       }
       break;
@@ -405,54 +448,6 @@ self.onmessage = async function(event: MessageEvent) {
       }
       break;
 
-      case "get-track-data":
-
-
-        if(! transformer){
-          return postMessage({ request_id: event.data.request_id, error: "Not initialized"});
-        }
-        try{
-        
-              console.log("Getting track data")
-
-              console.log("Transformer", transformer);
-
-         
-              const trackData = transformer.demuxer.getTracks()
-
-              console.log("Track data");
-              console.log(trackData)
-
-            
-
-              console.log("Video track data", trackData.video);
-
-              console.log("Offscreen canvas", offscreenCanvas);
-
-              if(offscreenCanvas && trackData.video) {
-                offscreenCanvas.height = trackData.video.codedHeight;
-                offscreenCanvas.width = trackData.video.codedWidth;
-              }
-
-        
-            postMessage({ request_id: event.data.request_id, res: trackData });
-        } catch (e) {
-            postMessage({ request_id: event.data.request_id, error: e});
-        }
-        break
-
-    case "get-track-segment":
-        try{
-        
-            console.log("Getting track segment", event.data.data.type, event.data.data.start, event.data.data.end);
-            const chunks = await transformer.demuxer.extractSegment( event.data.data.type, event.data.data.start, event.data.data.end);
-            console.log("Chunks", chunks);
-            postMessage({ request_id: event.data.request_id, res: chunks});
-        } catch (e) {
-            console.log("Error", e)
-            postMessage({ request_id: event.data.request_id, error: e});
-        }
-        break
 
     case "terminate":
       if (transformer) {

@@ -105,46 +105,49 @@ export class WebCodecsPlayer extends EventEmitter {
 
     console.log("Initializing");
 
+    // Create file demuxer worker
     this.worker = new WorkerController(workerUrl);
 
-    // Use the worker-based renderer
-    this.renderer = new VideoWorker({
-      src: this.file,
-      canvas: this.canvas!
-    });
+    // Create MessageChannel for file worker <-> video worker communication
+    const videoChannel = new MessageChannel();
 
-    // Initialize the renderer
-    await this.renderer.initialize();
-    
+    // Initialize file worker with video port
+    await this.worker.sendMessage('init', {
+      file: this.file,
+      videoPort: videoChannel.port1
+    }, [videoChannel.port1]);
 
-
-
-    console.log("Getting track data");
-    
-    const trackData = <TrackData> await this.renderer?.getTrackData();
-
+    // Get track metadata from file worker
+    const trackData = <TrackData> await this.worker.sendMessage('get-tracks', {});
     console.log("Track data", trackData);
 
     this.duration = trackData.duration;
-    console.log("Audio config", trackData.audio);
-    
+
+    // Initialize video worker with port to file worker
+    this.renderer = new VideoWorker({
+      src: this.file,
+      canvas: this.canvas!,
+      fileWorkerPort: videoChannel.port2
+    });
+
+    await this.renderer.initialize();
+
+    // Send track metadata to video worker
+    await this.renderer.setTrackData(trackData.video!, trackData.duration);
+
+    // Initialize audio player with file worker
     this.audioPlayer = new WebAudioPlayer({
       worker: this.worker,
       audioConfig: trackData.audio!,
       duration: trackData.duration,
       file: this.file
     });
-    
+
     // Set up time synchronization
     this.audioPlayer.on('time', (time) => {
       this.emit('timeupdate', time);
-
-
       this.renderer?.render(time);
     });
-    
-
-    
   }
 
   // Add more methods as needed

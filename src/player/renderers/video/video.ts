@@ -7,6 +7,7 @@ import { TrackData } from "../../player";
 export interface VideoWorkerParams {
   src: File;
   canvas: HTMLCanvasElement;
+  fileWorkerPort: MessagePort;
 }
 
 
@@ -28,15 +29,16 @@ export class VideoWorker extends EventEmitter {
   private playStartTime: number = 0;
   private pauseTime: number = 0;
 
+  private fileWorkerPort: MessagePort;
+
   constructor(params: VideoWorkerParams) {
     super();
     this.canvas = params.canvas;
     this.file = params.src;
-    
+    this.fileWorkerPort = params.fileWorkerPort;
+
     // Create the worker
     this.worker = new WorkerController(workerUrl);
-    
-
   }
   
 
@@ -51,20 +53,16 @@ export class VideoWorker extends EventEmitter {
   async initialize(): Promise<void> {
     // Create the offscreen canvas
     this.offscreenCanvas = this.canvas.transferControlToOffscreen();
-    
-    // Initialize the worker with the offscreen canvas
 
+    // Initialize the worker with the offscreen canvas and file worker port
     console.log("Initializing worker", this.offscreenCanvas);
     const initialized = await this.worker.sendMessage('init', {
       canvas: this.offscreenCanvas,
-      file: this.file
-    }, [this.offscreenCanvas]);
-    
+      fileWorkerPort: this.fileWorkerPort
+    }, [this.offscreenCanvas, this.fileWorkerPort]);
 
     console.log("Initialized", initialized);
-    // Store metadata
-;
-    
+
     // Emit initialization event
     this.emit('initialized', initialized);
   }
@@ -80,20 +78,10 @@ export class VideoWorker extends EventEmitter {
   }
 
 
-  async getTrackData(): Promise<TrackData> {
-    return await this.worker.sendMessage('get-track-data', {
-      file: this.file
-    });
-  }
-
-  async getTrackSegment(type: string, start: number, end: number): Promise<EncodedVideoChunk[]> {
-
-    console.log("Getting track segment", type, start, end);
-    return await this.worker.sendMessage('get-track-segment', {
-      file: this.file,
-      type,
-      start,
-      end
+  async setTrackData(videoMetadata: any, duration: number): Promise<void> {
+    await this.worker.sendMessage('set-track-data', {
+      videoMetadata,
+      duration
     });
   }
   /**
