@@ -1,5 +1,4 @@
-import { VideoTrackData } from './decoder';
-import { extractSegment, getMeta, getTrackData, getVideoTrack} from '../../file';
+import {MP4Demuxer} from 'webcodecs-utils';
 
 
 // Types and functions imported from file.ts
@@ -33,7 +32,6 @@ let videoManager: VideoTransformer | null = null;
 let offscreenCanvas: OffscreenCanvas | null = null;
 
 
-import { WorkerController } from "../../../utils/WorkerController";
 import VideoRenderer, { VideoTrackData } from "./decoder";
 
 // Same chunk duration as used in audio
@@ -44,15 +42,14 @@ const CHUNK_DURATION = 10; // Duration of each chunk in seconds
  * Each VideoRenderer is responsible for rendering frames from its own chunk
  */
 export default class VideoTransformer {
-    private videoMetadata: VideoTrackData;
+    private videoMetadata: | undefined;
     private file: File;
-    private duration: number;
+    private duration: number | undefined;
     private canvas: OffscreenCanvas;
-    public mp4Data: MP4Data;;
     
     // Map of chunk index to VideoRenderer
     private renderers: Map<number, VideoRenderer>;
-    
+    public demuxer: MP4Demuxer;
     // Cached chunks data
     private loadedChunks: Map<number, EncodedVideoChunk[]>;
     
@@ -66,15 +63,14 @@ export default class VideoTransformer {
 
     constructor(
         canvas: OffscreenCanvas,
-        file: File,
-        mp4Data: MP4Data,
+        file: File
     ) {
-        this.videoMetadata = mp4Data.trackData.video!;
+
         this.canvas = canvas;
         this.file = file;
-        this.duration = mp4Data.trackData.duration;
-        this.mp4Data = mp4Data;
         this.renderers = new Map();
+        this.demuxer = new MP4Demuxer(file);
+
         this.loadedChunks = new Map();
         this.currentChunkIndex = -1;
         this.activeRenderer = null;
@@ -88,6 +84,10 @@ export default class VideoTransformer {
 
     async initialize(){
         // Initialize with the first chunk
+
+        await this.demuxer.load();
+        this.videoMetadata = this.demuxer.getVideoTrack();
+      
         await this.initializeChunk(0);
         await this.seek(0);
     }
@@ -114,14 +114,7 @@ export default class VideoTransformer {
         try {
 
             
-            const chunks = <EncodedVideoChunk[]> await extractSegment(
-                this.file,
-                this.mp4Data,
-                'video',
-                startTime,
-                endTime
-            );
-            
+            const chunks = <EncodedVideoChunk[]> await this.demuxer.extractSegment('video', startTime, endTime);
 
 
             // Cache the chunks
@@ -322,6 +315,7 @@ export default class VideoTransformer {
 let transformer: VideoTransformer | null = null;
 
 
+
 // Main message handler
 self.onmessage = async function(event: MessageEvent) {
   const { cmd, data, request_id } = event.data;
@@ -333,14 +327,12 @@ self.onmessage = async function(event: MessageEvent) {
         offscreenCanvas = data.canvas;
         const file = data.file;
         
-        // Load the metadata
-        const mp4Data = <MP4Data> await getMeta(file);
+    
 
         // Create the video manager with the offscreen canvas
         transformer = new VideoTransformer(
           offscreenCanvas as OffscreenCanvas, // Cast to HTMLCanvasElement
-          file,
-          mp4Data
+          file
         );
 
 
@@ -414,45 +406,36 @@ self.onmessage = async function(event: MessageEvent) {
       break;
 
       case "get-track-data":
+
+
+        if(! transformer){
+          return postMessage({ request_id: event.data.request_id, error: "Not initialized"});
+        }
         try{
-
-            console.log("Getting track data")
-
-            if(transformer) {
-
-
+        
+              console.log("Getting track data")
 
               console.log("Transformer", transformer);
 
-              const mp4Data = transformer.mp4Data;
+         
+              const trackData = transformer.demuxer.getTracks()
 
-              console.log("MP4 Data", mp4Data);
+              console.log("Track data");
+              console.log(trackData)
 
-              const trackData = mp4Data.trackData;
+            
 
-              const videoTrackData = trackData.video;
-
-              console.log("Video track data", videoTrackData);
+              console.log("Video track data", trackData.video);
 
               console.log("Offscreen canvas", offscreenCanvas);
 
-              if(offscreenCanvas && videoTrackData) {
-                offscreenCanvas.height = videoTrackData.codedHeight;
-                offscreenCanvas.width = videoTrackData.codedWidth;
+              if(offscreenCanvas && trackData.video) {
+                offscreenCanvas.height = trackData.video.codedHeight;
+                offscreenCanvas.width = trackData.video.codedWidth;
               }
 
-              self.postMessage({
-                request_id,
-                res: transformer.mp4Data.trackData
-              });
-              return;
-            }
-
-            const mp4Data = await getMeta(event.data.data.file);
-
-
-            console.log("Track data", mp4Data.trackData);
-            postMessage({ request_id: event.data.request_id, res: mp4Data.trackData });
+        
+            postMessage({ request_id: event.data.request_id, res: trackData });
         } catch (e) {
             postMessage({ request_id: event.data.request_id, error: e});
         }
@@ -460,16 +443,9 @@ self.onmessage = async function(event: MessageEvent) {
 
     case "get-track-segment":
         try{
-            let mp4Data;
-
-            if(!transformer) {
-              mp4Data = await getMeta(event.data.data.file);
-            } else{
-              mp4Data = transformer.mp4Data;
-            }
-
+        
             console.log("Getting track segment", event.data.data.type, event.data.data.start, event.data.data.end);
-            const chunks = await extractSegment(event.data.data.file, mp4Data, event.data.data.type, event.data.data.start, event.data.data.end);
+            const chunks = await transformer.demuxer.extractSegment( event.data.data.type, event.data.data.start, event.data.data.end);
             console.log("Chunks", chunks);
             postMessage({ request_id: event.data.request_id, res: chunks});
         } catch (e) {
