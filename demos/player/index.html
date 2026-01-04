@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WebCodecs Player</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+    
+    h1 {
+      text-align: center;
+      margin-bottom: 20px;
+    }
+    
+    .video-container {
+      position: relative;
+      width: 640px;
+      margin: 0 auto;
+    }
+    
+    canvas {
+      display: block;
+      background-color: #000;
+      border-radius: 4px;
+    }
+    
+    .controls {
+      width: 640px;
+      margin: 10px auto;
+      background-color: #f5f5f5;
+      border-radius: 4px;
+      padding: 10px;
+    }
+    
+    .transport-controls {
+      display: flex;
+      align-items: center;
+      margin-bottom: 10px;
+    }
+    
+    .transport-controls button {
+      background-color: #2d3748;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      padding: 8px 16px;
+      margin-right: 10px;
+      cursor: pointer;
+      font-weight: bold;
+      transition: background-color 0.2s;
+    }
+    
+    .transport-controls button:hover {
+      background-color: #4a5568;
+    }
+    
+    .transport-controls button:disabled {
+      background-color: #a0aec0;
+      cursor: not-allowed;
+    }
+    
+    .time-display {
+      margin-left: auto;
+      font-family: monospace;
+      font-size: 14px;
+      color: #4a5568;
+    }
+    
+    .seek-container {
+      width: 100%;
+      display: flex;
+      align-items: center;
+    }
+    
+    .seek-bar {
+      flex-grow: 1;
+      height: 8px;
+      -webkit-appearance: none;
+      background-color: #cbd5e0;
+      border-radius: 4px;
+      outline: none;
+      transition: background 0.2s;
+    }
+    
+    .seek-bar::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background-color: #3182ce;
+      cursor: pointer;
+    }
+    
+    .seek-bar::-moz-range-thumb {
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background-color: #3182ce;
+      cursor: pointer;
+      border: none;
+    }
+    
+    .file-controls {
+      margin-top: 20px;
+      display: flex;
+      justify-content: center;
+    }
+    
+    .file-controls button {
+      background-color: #3182ce;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      padding: 10px 20px;
+      cursor: pointer;
+      font-weight: bold;
+      transition: background-color 0.2s;
+    }
+    
+    .file-controls button:hover {
+      background-color: #2b6cb0;
+    }
+    
+    .disabled {
+      opacity: 0.5;
+      pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <h1>WebCodecs Player</h1>
+    
+    <div class="video-container">
+      <canvas id="canvas" width="640" height="360"></canvas>
+    </div>
+    
+    <div class="controls disabled" id="videoControls">
+      <div class="transport-controls">
+        <button id="playBtn">Play</button>
+        <button id="pauseBtn">Pause</button>
+        <div class="time-display">
+          <span id="currentTime">00:00</span> / <span id="duration">00:00</span>
+        </div>
+      </div>
+      
+      <div class="seek-container">
+        <input type="range" min="0" max="100" value="0" class="seek-bar" id="seekBar">
+      </div>
+    </div>
+    
+    <div class="file-controls">
+      <button id="loadFileBtn">Load Video File</button>
+    </div>
+  </div>
+  
+  <script type="module" src="/demos/player/demo.ts"></script>
+  
+  <script>
+    // This script assumes the demo.ts will expose a videoPlayer object with the necessary methods
+    document.addEventListener('DOMContentLoaded', () => {
+      const playBtn = document.getElementById('playBtn');
+      const pauseBtn = document.getElementById('pauseBtn');
+      const seekBar = document.getElementById('seekBar');
+      const currentTimeEl = document.getElementById('currentTime');
+      const durationEl = document.getElementById('duration');
+      const videoControls = document.getElementById('videoControls');
+      
+      // Format time helper function (converts seconds to MM:SS format)
+      function formatTime(seconds) {
+        seconds = Math.floor(seconds);
+        const minutes = Math.floor(seconds / 60);
+        seconds = seconds % 60;
+        return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+      }
+      
+      // Global variable that will be set by demo.ts when a video is loaded
+      window.setupVideoControls = function(videoPlayer) {
+        let isDraggingSeekBar = false;
+        let videoDuration = 0;
+        
+        // Enable controls
+        videoControls.classList.remove('disabled');
+        
+        // Play button
+        playBtn.addEventListener('click', () => {
+
+          console.log("Playing");
+          videoPlayer.play();
+        });
+        
+        // Pause button
+        pauseBtn.addEventListener('click', () => {
+          videoPlayer.pause();
+        });
+        
+        // Seek bar input (while dragging)
+        seekBar.addEventListener('input', () => {
+          isDraggingSeekBar = true;
+          const seekTime = (seekBar.value / 100) * videoDuration;
+          currentTimeEl.textContent = formatTime(seekTime);
+        });
+        
+        // Seek bar change (on release)
+        seekBar.addEventListener('change', () => {
+          const seekTime = (seekBar.value / 100) * videoDuration;
+          videoPlayer.seek(seekTime);
+          isDraggingSeekBar = false;
+        });
+        
+        // Update duration if available
+        if (videoPlayer.duration) {
+          videoDuration = videoPlayer.duration;
+          durationEl.textContent = formatTime(videoDuration);
+        }
+        
+        // Listen for time updates
+        videoPlayer.on('timeupdate', (time) => {
+          if (!isDraggingSeekBar) {
+            currentTimeEl.textContent = formatTime(time);
+            if (videoDuration > 0) {
+              seekBar.value = (time / videoDuration) * 100;
+            }
+          }
+        });
+        
+        // Listen for duration change
+        videoPlayer.on('durationchange', (duration) => {
+          videoDuration = duration;
+          durationEl.textContent = formatTime(duration);
+        });
+        
+        // Update UI based on player state
+        videoPlayer.on('play', () => {
+          playBtn.disabled = true;
+          pauseBtn.disabled = false;
+        });
+        
+        videoPlayer.on('pause', () => {
+          playBtn.disabled = false;
+          pauseBtn.disabled = true;
+        });
+        
+        // Initial state
+        pauseBtn.disabled = true;
+      };
+    });
+  </script>
+</body>
+</html>
