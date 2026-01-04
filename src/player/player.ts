@@ -87,7 +87,7 @@ export class WebCodecsPlayer extends EventEmitter {
           startTime: this.audioPlayer.startTime,
           pauseTime: this.audioPlayer.pauseTime,
           isPlaying: this.audioPlayer.isPlaying,
-          currentBufferCount: this.audioPlayer.audioBuffers.size,
+          loadedSegments: this.audioPlayer.audioSegments.size,
           scheduledNodeCount: this.audioPlayer.scheduledNodes.size
         } : null,
         video: videoDebugInfo ? {

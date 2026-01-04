@@ -214,14 +214,7 @@
     <div class="debug-panel disabled" id="debugPanel">
       <h3>Debug Information</h3>
 
-      <div class="debug-section">
-        <h4>Track Data</h4>
-        <div class="debug-row">
-          <span class="debug-label">Duration:</span>
-          <span class="debug-value" id="debugDuration">--</span>
-        </div>
-      </div>
-
+   
       <div class="debug-section">
         <h4>Audio</h4>
         <div class="debug-row">
@@ -244,14 +237,6 @@
           <span class="debug-label">Pause Time:</span>
           <span class="debug-value" id="debugAudioPauseTime">--</span>
         </div>
-        <div class="debug-row">
-          <span class="debug-label">Buffer Count:</span>
-          <span class="debug-value" id="debugAudioBufferCount">--</span>
-        </div>
-        <div class="debug-row">
-          <span class="debug-label">Scheduled Nodes:</span>
-          <span class="debug-value" id="debugAudioScheduledNodes">--</span>
-        </div>
       </div>
 
       <div class="debug-section">
@@ -269,18 +254,6 @@
           <span class="debug-value" id="debugVideoFrameRate">--</span>
         </div>
         <div class="debug-row">
-          <span class="debug-label">Current Chunk:</span>
-          <span class="debug-value" id="debugVideoCurrentChunk">--</span>
-        </div>
-        <div class="debug-row">
-          <span class="debug-label">Total Renderers:</span>
-          <span class="debug-value" id="debugVideoTotalRenderers">--</span>
-        </div>
-        <div class="debug-row">
-          <span class="debug-label">Loaded Chunks:</span>
-          <span class="debug-value" id="debugVideoLoadedChunks">--</span>
-        </div>
-        <div class="debug-row">
           <span class="debug-label">Render Buffer Size:</span>
           <span class="debug-value" id="debugVideoRenderBufferSize">--</span>
         </div>
@@ -291,10 +264,6 @@
         <div class="debug-row">
           <span class="debug-label">Last Rendered Time:</span>
           <span class="debug-value" id="debugVideoLastRenderedTime">--</span>
-        </div>
-        <div class="debug-row">
-          <span class="debug-label">Is Preloading:</span>
-          <span class="debug-value" id="debugVideoIsPreloading">--</span>
         </div>
       </div>
 
@@ -416,7 +385,7 @@
             const debugInfo = await videoPlayer.getDebugInfo();
 
             // Track Data
-            document.getElementById('debugDuration').textContent = debugInfo.trackData.duration.toFixed(2) + 's';
+       //     document.getElementById('debugDuration').textContent = debugInfo.trackData.duration.toFixed(2) + 's';
 
             // Audio
             if (debugInfo.trackData.audio) {
@@ -426,8 +395,7 @@
               document.getElementById('debugAudioChannels').textContent = audio.numberOfChannels;
               document.getElementById('debugAudioStartTime').textContent = audio.startTime.toFixed(2) + 's';
               document.getElementById('debugAudioPauseTime').textContent = audio.pauseTime.toFixed(2) + 's';
-              document.getElementById('debugAudioBufferCount').textContent = audio.currentBufferCount;
-              document.getElementById('debugAudioScheduledNodes').textContent = audio.scheduledNodeCount;
+              // Note: loadedSegments = number of decoded audio segments (30s blocks containing EncodedAudioChunks)
             }
 
             // Video
@@ -436,10 +404,10 @@
               document.getElementById('debugVideoCodec').textContent = video.codec || '--';
               document.getElementById('debugVideoResolution').textContent = video.width && video.height ? `${video.width}x${video.height}` : '--';
               document.getElementById('debugVideoFrameRate').textContent = video.frameRate ? `${video.frameRate} fps` : '--';
-              document.getElementById('debugVideoCurrentChunk').textContent = video.currentChunkIndex ?? '--';
-              document.getElementById('debugVideoTotalRenderers').textContent = video.totalRenderers ?? '--';
-              document.getElementById('debugVideoLoadedChunks').textContent = video.loadedChunks ?? '--';
-              document.getElementById('debugVideoIsPreloading').textContent = video.isPreloading ? 'Yes' : 'No';
+              //document.getElementById('debugVideoCurrentChunk').textContent = video.currentChunkIndex ?? '--';
+              //document.getElementById('debugVideoTotalRenderers').textContent = video.totalRenderers ?? '--';
+            //  document.getElementById('debugVideoLoadedChunks').textContent = video.loadedChunks ?? '--';
+          //    document.getElementById('debugVideoIsPreloading').textContent = video.isPreloading ? 'Yes' : 'No';
 
               if (video.activeRenderer) {
                 document.getElementById('debugVideoRenderBufferSize').textContent = video.activeRenderer.renderBufferSize ?? '--';
