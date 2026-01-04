@@ -16,6 +16,12 @@ A high-performance video player built with WebCodecs API, featuring GPU-accelera
 ```
 Main Thread (player.ts)
     │
+    ├─> Clock (clock.ts) - Time Management
+    │   ├─> Queries audio timeline (source of truth)
+    │   ├─> Manages requestAnimationFrame loop (30fps)
+    │   ├─> Emits tick events for UI updates
+    │   └─> Coordinates video rendering
+    │
     ├─> file.ts Worker (MP4 Demuxer)
     │   ├─> Parses MP4 files using webcodecs-utils MP4Demuxer
     │   ├─> Extracts audio chunks → Main thread (audio player)
@@ -25,13 +31,14 @@ Main Thread (player.ts)
     │   ├─> Receives chunks from file worker via MessagePort
     │   ├─> Manages VideoRenderer instances (chunked playback)
     │   ├─> Decodes VideoFrames using VideoDecoder
-    │   └─> Renders to OffscreenCanvas with GPUFrameRenderer
+    │   ├─> Renders to OffscreenCanvas with GPUFrameRenderer
+    │   └─> Passively renders at times provided by Clock
     │
     └─> audio.ts (Web Audio Player)
         ├─> Requests audio chunks from file worker
         ├─> Muxes chunks to AAC buffer using mp4-muxer
         ├─> Decodes with Web Audio API (AudioContext.decodeAudioData)
-        └─> Provides timeline for video synchronization
+        └─> Provides timeline (AudioContext.currentTime) as source of truth
 ```
 
 ## Key Components
@@ -39,9 +46,18 @@ Main Thread (player.ts)
 ### WebCodecsPlayer (`player.ts`)
 Main controller that coordinates all components:
 - Sets up MessageChannel for worker-to-worker communication
-- Manages file worker, video worker, and audio player
-- Handles play/pause/seek commands
-- Emits time updates for UI synchronization
+- Manages file worker, video worker, audio player, and clock
+- Delegates playback control to Clock
+- Forwards events from Clock to external listeners
+
+### Clock (`clock.ts`)
+Central time manager that coordinates playback:
+- Uses audio timeline (Web Audio API) as source of truth
+- Manages requestAnimationFrame loop at 30fps
+- Emits `tick` events for UI updates
+- Coordinates play/pause/seek across audio and video
+- Provides `getCurrentTime()` for on-demand queries
+- **Why separate?** Makes timing logic explicit and easier to understand
 
 ### File Worker (`file.ts`)
 Pure MP4 demuxer worker:
@@ -68,8 +84,8 @@ Manages video decoding and GPU rendering:
 Web Audio API integration:
 - Muxes EncodedAudioChunks to AAC with mp4-muxer
 - Decodes audio with `AudioContext.decodeAudioData`
-- Provides timeline as source of truth for A/V sync
-- Emits time updates for video rendering
+- Provides timeline (`AudioContext.currentTime`) as source of truth
+- Clock queries this timeline to get current playback position
 
 ## Usage
 
@@ -298,10 +314,11 @@ Requires:
 ```
 src/player/
 ├── player.ts              # Main player controller
+├── clock.ts              # Time management and coordination
 ├── file.ts               # MP4 demuxer worker
 ├── renderers/
 │   ├── audio/
-│   │   └── audio.ts      # Web Audio player
+│   │   └── audio.ts      # Web Audio player (timeline source of truth)
 │   └── video/
 │       ├── video.ts      # Video worker manager
 │       ├── video.worker.ts  # Video decoding worker
@@ -311,13 +328,35 @@ src/player/
 
 ### Key Patterns
 
-**Audio-Video Sync:**
+**Audio-Video Sync via Clock:**
 ```typescript
-// Audio timeline is source of truth
-audioPlayer.on('time', (time) => {
-  // Video renders the frame closest to this time
-  videoWorker.render(time);
+// Clock queries audio timeline (source of truth)
+const currentTime = audioPlayer.getCurrentTime();
+
+// Clock emits tick events at 30fps
+clock.on('tick', (time) => {
+  // UI updates
+  updateProgressBar(time);
 });
+
+// Clock tells video worker to render (passive)
+videoWorker.render(currentTime);
+```
+
+**Why use a Clock?**
+```typescript
+// Instead of this (scattered timing logic):
+audioPlayer.on('time', (time) => {
+  videoWorker.render(time);
+  updateUI(time);
+});
+
+// We have this (centralized timing):
+clock.tick() {
+  const time = audioPlayer.getCurrentTime(); // Query audio timeline
+  this.emit('tick', time);                   // UI updates
+  videoWorker.render(time);                  // Video renders
+}
 ```
 
 **Worker-to-Worker Communication:**
