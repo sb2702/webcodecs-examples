@@ -167,17 +167,22 @@ export class WebCodecsPlayer extends EventEmitter {
     // Send track metadata to video worker
     await this.renderer.setTrackData(trackData.video!, trackData.duration);
 
-    // Initialize audio player with file worker
+    // Create clock to manage playback timing
+    // The clock coordinates audio and video using the audio timeline as source of truth
+    this.clock = new Clock(this.renderer, this.duration);
+
+    // Initialize audio player with file worker and clock
+    // Audio player subscribes to clock's tick events for segment preloading
     this.audioPlayer = new WebAudioPlayer({
       worker: this.worker,
       audioConfig: trackData.audio!,
       duration: trackData.duration,
-      file: this.file
+      file: this.file,
+      clock: this.clock
     });
 
-    // Create clock to manage playback timing
-    // The clock coordinates audio and video using the audio timeline as source of truth
-    this.clock = new Clock(this.audioPlayer, this.renderer, this.duration);
+    // Set the audio player as the clock's time source
+    this.clock.setAudioPlayer(this.audioPlayer);
 
     // Forward clock events to external listeners
     this.clock.on('tick', (time) => {

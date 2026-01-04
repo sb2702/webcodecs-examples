@@ -1,7 +1,7 @@
 import {ArrayBufferTarget, Muxer} from "mp4-muxer";
-import EventEmitter from "../../../utils/EventEmitter";
 import { WorkerController } from "../../../utils/WorkerController";
-import { VideoWorker } from "../video/video";
+import type { Clock } from "../../clock";
+
 export interface AudioTrackData {
     codec: string,
     sampleRate: number ,
@@ -18,10 +18,11 @@ export interface AudioPlayerArgs {
     duration: number;
     worker: WorkerController;
     file: File;
+    clock: Clock;
 }
 
 
-export class WebAudioPlayer extends EventEmitter {
+export class WebAudioPlayer {
 
 
     audioContext: AudioContext | null;
@@ -30,7 +31,6 @@ export class WebAudioPlayer extends EventEmitter {
     startTime: number;
     pauseTime: number;
     duration: number;
-    animationFrame: number | null;
     encodedChunks: EncodedAudioChunk[]; // EncodedAudioChunks from current segment
     audioSegments: Map<number, AudioBuffer>; // Decoded audio segments (segmentIndex -> AudioBuffer)
     scheduledNodes: Map<number, AudioBufferSourceNode>;
@@ -40,15 +40,15 @@ export class WebAudioPlayer extends EventEmitter {
     worker: WorkerController;
     isPreloading: boolean;
     audioConfig: AudioTrackData | null;
+    clock: Clock;
+
     constructor(args: AudioPlayerArgs) {
-        super();
         this.audioContext = null;
         this.sourceNode = null;
         this.isPlaying = false;
         this.startTime = 0;
         this.pauseTime = 0;
         this.duration = args.duration;
-        this.animationFrame = null;
         this.audioConfig = args.audioConfig;
 
         this.encodedChunks = [];
@@ -60,7 +60,10 @@ export class WebAudioPlayer extends EventEmitter {
         //Audio Renderer gets its own worker to avoid using the video worker to get audio chunks while the video renderer is running / fetching video chunks
         this.worker = args.worker;
         this.file = args.file;
+        this.clock = args.clock;
 
+        // Subscribe to Clock's tick events for segment preloading
+        this.clock.on('tick', this.onClockTick.bind(this));
 
         this.init();
     }
@@ -69,7 +72,7 @@ export class WebAudioPlayer extends EventEmitter {
         this.audioContext = new AudioContext();
 
         this.seek(0);
-        
+
     }
 
     /**
@@ -218,10 +221,9 @@ export class WebAudioPlayer extends EventEmitter {
         sourceNode.buffer = audioBuffer;
         sourceNode.connect(this.audioContext!.destination);
 
-        const currentTime = this.audioContext!.currentTime;
+
         const playbackTime = this.startTime + (startTime - this.pauseTime);
 
-        console.log("Scheduling segment at time", playbackTime, "with offset", offset);
         sourceNode.start(playbackTime, offset);
         this.scheduledNodes.set(startTime, sourceNode);
 
@@ -236,56 +238,38 @@ export class WebAudioPlayer extends EventEmitter {
         this.startTime = this.audioContext!.currentTime;
         await this.startPlayback();
         this.isPlaying = true;
-        this.updatePlaybackPosition();
     }
 
     async pause() {
         this.clearScheduledNodes();
-        if (this.animationFrame) {
-            cancelAnimationFrame(this.animationFrame);
-        }
         this.pauseTime = this.getCurrentTime();
-   
         this.isPlaying = false;
     }
 
-  
+
     async seek(time: number) {
-
-
-
-       
         const wasPlaying = this.isPlaying;
-        
+
         if (wasPlaying) {
             this.clearScheduledNodes();
             this.isPlaying = false;
         }
 
         this.pauseTime = time;
-        this.updateTimeDisplay(time);
 
         if (wasPlaying) {
             this.startTime = this.audioContext!.currentTime;
             this.isPlaying = true;
             await this.startPlayback(time);
-
         }
     }
 
-    updatePlaybackPosition() {
-
-    
-        if (!this.isPlaying) return;
-
-        const currentTime = this.getCurrentTime();
-  
-
-
-
-        this.emit('time', currentTime);
-
-        // Check if we need to preload the next segment
+    /**
+     * Tick handler - called by Clock on each tick
+     * Checks if we need to preload the next segment
+     * @param currentTime - Current playback time from audio timeline
+     */
+    private onClockTick(currentTime: number) {
         const currentSegmentIndex = this.getCurrentSegmentIndex();
         const timeInCurrentSegment = currentTime % SEGMENT_DURATION;
 
@@ -294,25 +278,11 @@ export class WebAudioPlayer extends EventEmitter {
             !this.audioSegments.has(currentSegmentIndex + 1)) {
             this.preloadNextSegment((currentSegmentIndex + 1) * SEGMENT_DURATION);
         }
-
-        if (currentTime < this.duration) {
-            this.animationFrame = requestAnimationFrame(
-                this.updatePlaybackPosition.bind(this)
-            );
-        } else {
-            this.pause();
-        }
     }
 
     getCurrentTime() {
         if (!this.isPlaying) return this.pauseTime;
         return this.pauseTime + (this.audioContext!.currentTime - this.startTime);
-    }
-
-    updateTimeDisplay(currentTime) {
-
-        console.log("Updating time display", currentTime);
-
     }
 }
 

@@ -28,7 +28,7 @@ import { VideoWorker } from './renderers/video/video';
  */
 export class Clock extends EventEmitter {
 
-  private audioPlayer: WebAudioPlayer;
+  private audioPlayer: WebAudioPlayer | null = null;
   private videoWorker: VideoWorker;
   private isPlaying: boolean = false;
   private animationFrame: number | null = null;
@@ -41,17 +41,23 @@ export class Clock extends EventEmitter {
 
   /**
    * Create a new Clock
-   * @param audioPlayer - Audio player with Web Audio timeline
    * @param videoWorker - Video worker for passive rendering
    * @param duration - Total video duration in seconds
    */
-  constructor(audioPlayer: WebAudioPlayer, videoWorker: VideoWorker, duration: number) {
+  constructor(videoWorker: VideoWorker, duration: number) {
     super();
 
-    this.audioPlayer = audioPlayer;
     this.videoWorker = videoWorker;
     this.duration = duration;
     this.FRAME_INTERVAL = 1000 / this.TARGET_FPS;
+  }
+
+  /**
+   * Set the audio player (source of truth for timeline)
+   * Must be called before play()
+   */
+  setAudioPlayer(audioPlayer: WebAudioPlayer) {
+    this.audioPlayer = audioPlayer;
   }
 
   /**
@@ -62,6 +68,7 @@ export class Clock extends EventEmitter {
    */
   async play(): Promise<void> {
     if (this.isPlaying) return;
+    if (!this.audioPlayer) throw new Error('Audio player not set');
 
     this.isPlaying = true;
 
@@ -120,7 +127,7 @@ export class Clock extends EventEmitter {
    * @returns Current time in seconds
    */
   getCurrentTime(): number {
-    return this.audioPlayer.getCurrentTime();
+    return this.audioPlayer?.getCurrentTime() || 0;
   }
 
   /**
