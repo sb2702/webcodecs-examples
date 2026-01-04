@@ -23,7 +23,7 @@ let videoManager: VideoTransformer | null = null;
 let offscreenCanvas: OffscreenCanvas | null = null;
 
 // Same chunk duration as used in audio
-const CHUNK_DURATION = 10; // Duration of each chunk in seconds
+const CHUNK_DURATION = 300; // Duration of each chunk in seconds
 
 /**
  * ChunkedVideoManager manages multiple VideoRenderer instances, one per chunk
@@ -76,7 +76,7 @@ export default class VideoTransformer {
     }
 
     private handleFileWorkerMessage(event: MessageEvent) {
-        const { cmd, request_id, data, error } = event.data;
+        const { cmd, request_id, res, error } = event.data;
 
         if (cmd === 'chunks' && request_id) {
             const pending = this.pendingRequests.get(request_id);
@@ -84,7 +84,7 @@ export default class VideoTransformer {
                 if (error) {
                     pending.reject(new Error(error));
                 } else {
-                    pending.resolve(data);
+                    pending.resolve(res);
                 }
                 this.pendingRequests.delete(request_id);
             }

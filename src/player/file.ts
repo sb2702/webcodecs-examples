@@ -112,7 +112,7 @@ function handleVideoWorkerMessage(event: MessageEvent) {
           videoWorkerPort!.postMessage({
             cmd: 'chunks',
             request_id,
-            data: chunks
+            res: chunks
           });
         })
         .catch(error => {

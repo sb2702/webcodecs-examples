@@ -1,3 +1,4 @@
+import { GPUFrameRenderer } from 'webcodecs-utils';
 
 export interface VideoTrackData {
     codec: string,
@@ -16,9 +17,10 @@ export default class VideoRenderer {
     source_buffer: EncodedVideoChunk[] = [];
     rendered_buffer: VideoFrame[] = [];
     canvas: OffscreenCanvas;
-    ctx: ImageBitmapRenderingContext;
+    renderer: GPUFrameRenderer;
     decoder: VideoDecoder;
     metadata: VideoTrackData;
+    initP: Promise<void>
     constructor(metadata: VideoTrackData, chunks: EncodedVideoChunk[],  canvas: OffscreenCanvas) {
 
 
@@ -35,7 +37,9 @@ export default class VideoRenderer {
 
         this.canvas = canvas;
 
-        this.ctx = this.canvas.getContext('bitmaprenderer') as ImageBitmapRenderingContext;
+        // Initialize GPU renderer with linear filtering (hardware accelerated)
+        this.renderer = new GPUFrameRenderer(this.canvas, { filterMode: 'linear' });
+        this.initP = this.renderer.init();
 
         this.decoder = this.setupDecoder(metadata)
 
@@ -211,6 +215,9 @@ export default class VideoRenderer {
 
   async renderFrame(frame: VideoFrame){
 
+
+        await this.initP;
+
         try{
 
             if(frame.timestamp < this.lastRenderedTime) {
@@ -218,11 +225,9 @@ export default class VideoRenderer {
                 return;
             }
 
-            const bitmap = await createImageBitmap(frame);
-            this.ctx.transferFromImageBitmap(bitmap);
-            frame.close()
-            bitmap.close();
-
+            // Use GPU renderer for zero-copy rendering
+            this.renderer.drawImage(frame);
+            frame.close();
 
         } catch (e) {
             console.log(e);

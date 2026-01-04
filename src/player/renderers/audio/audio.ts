@@ -130,8 +130,6 @@ export class WebAudioPlayer extends EventEmitter {
         try {
 
 
-            console.log("Getting chunk for time", time);
-            console.log("Chunks", chunks);
 
         const a = performance.now();
             const muxedBuffer = await this.muxChunksToBuffer(chunks, this.audioConfig!);
