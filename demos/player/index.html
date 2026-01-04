@@ -239,15 +239,21 @@
         videoPlayer.on('play', () => {
           playBtn.disabled = true;
           pauseBtn.disabled = false;
+          console.log('Current time:', videoPlayer.getCurrentTime());
         });
-        
+
         videoPlayer.on('pause', () => {
           playBtn.disabled = false;
           pauseBtn.disabled = true;
+          console.log('Paused at:', videoPlayer.getCurrentTime());
         });
-        
+
         // Initial state
         pauseBtn.disabled = true;
+
+        // Display initial state
+        console.log('Player initialized at time:', videoPlayer.getCurrentTime());
+        console.log('Video duration:', videoPlayer.duration);
       };
     });
   </script>

@@ -45,7 +45,7 @@
   "bugs": {
     "url": "https://github.com/sb2702/webcodecs-examples/issues"
   },
-  "homepage": "https://webcodecsfundamentals.org",
+  "homepage": "https://www.webcodecsfundamentals.org",
   "devDependencies": {
     "@types/node": "^22.10.5",
     "typescript": "^5.8.3",

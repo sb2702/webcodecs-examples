@@ -46,11 +46,6 @@ export class WebCodecsPlayer extends EventEmitter {
 
   }
 
-  private setupWorkers() {
-    // Create message channels for worker communication
-  
-  }
-
 
 
   async play() {
@@ -78,6 +73,10 @@ export class WebCodecsPlayer extends EventEmitter {
     this.renderer?.seek(time);
     await this.audioPlayer?.seek(time);
 
+  }
+
+  getCurrentTime(): number {
+    return this.audioPlayer?.getCurrentTime() || 0;
   }
 
   terminate(){
