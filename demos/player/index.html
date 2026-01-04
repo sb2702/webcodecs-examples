@@ -21,12 +21,15 @@
       position: relative;
       width: 640px;
       margin: 0 auto;
+      display: flex;
+      justify-content: center;
     }
-    
+
     canvas {
       display: block;
       background-color: #000;
       border-radius: 4px;
+      margin: 0 auto;
     }
     
     .controls {
@@ -130,6 +133,56 @@
       opacity: 0.5;
       pointer-events: none;
     }
+
+    .debug-panel {
+      width: 640px;
+      margin: 20px auto;
+      background-color: #1a202c;
+      color: #e2e8f0;
+      border-radius: 4px;
+      padding: 15px;
+      font-family: 'Courier New', monospace;
+      font-size: 12px;
+    }
+
+    .debug-panel h3 {
+      margin: 0 0 10px 0;
+      color: #63b3ed;
+      font-size: 14px;
+    }
+
+    .debug-section {
+      margin-bottom: 15px;
+      padding: 10px;
+      background-color: #2d3748;
+      border-radius: 3px;
+    }
+
+    .debug-section h4 {
+      margin: 0 0 8px 0;
+      color: #68d391;
+      font-size: 13px;
+    }
+
+    .debug-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 3px 0;
+      border-bottom: 1px solid #4a5568;
+    }
+
+    .debug-row:last-child {
+      border-bottom: none;
+    }
+
+    .debug-label {
+      color: #a0aec0;
+    }
+
+    .debug-value {
+      color: #f7fafc;
+      font-weight: bold;
+    }
   </style>
 </head>
 <body>
@@ -157,6 +210,106 @@
     <div class="file-controls">
       <button id="loadFileBtn">Load Video File</button>
     </div>
+
+    <div class="debug-panel disabled" id="debugPanel">
+      <h3>Debug Information</h3>
+
+      <div class="debug-section">
+        <h4>Track Data</h4>
+        <div class="debug-row">
+          <span class="debug-label">Duration:</span>
+          <span class="debug-value" id="debugDuration">--</span>
+        </div>
+      </div>
+
+      <div class="debug-section">
+        <h4>Audio</h4>
+        <div class="debug-row">
+          <span class="debug-label">Codec:</span>
+          <span class="debug-value" id="debugAudioCodec">--</span>
+        </div>
+        <div class="debug-row">
+          <span class="debug-label">Sample Rate:</span>
+          <span class="debug-value" id="debugAudioSampleRate">--</span>
+        </div>
+        <div class="debug-row">
+          <span class="debug-label">Channels:</span>
+          <span class="debug-value" id="debugAudioChannels">--</span>
+        </div>
+        <div class="debug-row">
+          <span class="debug-label">Start Time:</span>
+          <span class="debug-value" id="debugAudioStartTime">--</span>
+        </div>
+        <div class="debug-row">
+          <span class="debug-label">Pause Time:</span>
+          <span class="debug-value" id="debugAudioPauseTime">--</span>
+        </div>
+        <div class="debug-row">
+          <span class="debug-label">Buffer Count:</span>
+          <span class="debug-value" id="debugAudioBufferCount">--</span>
+        </div>
+        <div class="debug-row">
+          <span class="debug-label">Scheduled Nodes:</span>
+          <span class="debug-value" id="debugAudioScheduledNodes">--</span>
+        </div>
+      </div>
+
+      <div class="debug-section">
+        <h4>Video Renderer</h4>
+        <div class="debug-row">
+          <span class="debug-label">Codec:</span>
+          <span class="debug-value" id="debugVideoCodec">--</span>
+        </div>
+        <div class="debug-row">
+          <span class="debug-label">Resolution:</span>
+          <span class="debug-value" id="debugVideoResolution">--</span>
+        </div>
+        <div class="debug-row">
+          <span class="debug-label">Frame Rate:</span>
+          <span class="debug-value" id="debugVideoFrameRate">--</span>
+        </div>
+        <div class="debug-row">
+          <span class="debug-label">Current Chunk:</span>
+          <span class="debug-value" id="debugVideoCurrentChunk">--</span>
+        </div>
+        <div class="debug-row">
+          <span class="debug-label">Total Renderers:</span>
+          <span class="debug-value" id="debugVideoTotalRenderers">--</span>
+        </div>
+        <div class="debug-row">
+          <span class="debug-label">Loaded Chunks:</span>
+          <span class="debug-value" id="debugVideoLoadedChunks">--</span>
+        </div>
+        <div class="debug-row">
+          <span class="debug-label">Render Buffer Size:</span>
+          <span class="debug-value" id="debugVideoRenderBufferSize">--</span>
+        </div>
+        <div class="debug-row">
+          <span class="debug-label">Decode Queue Size:</span>
+          <span class="debug-value" id="debugVideoDecodeQueueSize">--</span>
+        </div>
+        <div class="debug-row">
+          <span class="debug-label">Last Rendered Time:</span>
+          <span class="debug-value" id="debugVideoLastRenderedTime">--</span>
+        </div>
+        <div class="debug-row">
+          <span class="debug-label">Is Preloading:</span>
+          <span class="debug-value" id="debugVideoIsPreloading">--</span>
+        </div>
+      </div>
+
+      <div class="debug-section">
+        <h4>Clock</h4>
+        <div class="debug-row">
+          <span class="debug-label">Is Playing:</span>
+          <span class="debug-value" id="debugClockIsPlaying">--</span>
+        </div>
+        <div class="debug-row">
+          <span class="debug-label">Current Time:</span>
+          <span class="debug-value" id="debugClockCurrentTime">--</span>
+        </div>
+      </div>
+    </div>
   </div>
   
   <script type="module" src="/demos/player/demo.ts"></script>
@@ -183,9 +336,11 @@
       window.setupVideoControls = function(videoPlayer) {
         let isDraggingSeekBar = false;
         let videoDuration = 0;
-        
+        let debugUpdateInterval = null;
+
         // Enable controls
         videoControls.classList.remove('disabled');
+        document.getElementById('debugPanel').classList.remove('disabled');
         
         // Play button
         playBtn.addEventListener('click', () => {
@@ -254,6 +409,63 @@
         // Display initial state
         console.log('Player initialized at time:', videoPlayer.getCurrentTime());
         console.log('Video duration:', videoPlayer.duration);
+
+        // Update debug info periodically
+        async function updateDebugInfo() {
+          try {
+            const debugInfo = await videoPlayer.getDebugInfo();
+
+            // Track Data
+            document.getElementById('debugDuration').textContent = debugInfo.trackData.duration.toFixed(2) + 's';
+
+            // Audio
+            if (debugInfo.trackData.audio) {
+              const audio = debugInfo.trackData.audio;
+              document.getElementById('debugAudioCodec').textContent = audio.codec || '--';
+              document.getElementById('debugAudioSampleRate').textContent = audio.sampleRate + ' Hz';
+              document.getElementById('debugAudioChannels').textContent = audio.numberOfChannels;
+              document.getElementById('debugAudioStartTime').textContent = audio.startTime.toFixed(2) + 's';
+              document.getElementById('debugAudioPauseTime').textContent = audio.pauseTime.toFixed(2) + 's';
+              document.getElementById('debugAudioBufferCount').textContent = audio.currentBufferCount;
+              document.getElementById('debugAudioScheduledNodes').textContent = audio.scheduledNodeCount;
+            }
+
+            // Video
+            if (debugInfo.trackData.video) {
+              const video = debugInfo.trackData.video;
+              document.getElementById('debugVideoCodec').textContent = video.codec || '--';
+              document.getElementById('debugVideoResolution').textContent = video.width && video.height ? `${video.width}x${video.height}` : '--';
+              document.getElementById('debugVideoFrameRate').textContent = video.frameRate ? `${video.frameRate} fps` : '--';
+              document.getElementById('debugVideoCurrentChunk').textContent = video.currentChunkIndex ?? '--';
+              document.getElementById('debugVideoTotalRenderers').textContent = video.totalRenderers ?? '--';
+              document.getElementById('debugVideoLoadedChunks').textContent = video.loadedChunks ?? '--';
+              document.getElementById('debugVideoIsPreloading').textContent = video.isPreloading ? 'Yes' : 'No';
+
+              if (video.activeRenderer) {
+                document.getElementById('debugVideoRenderBufferSize').textContent = video.activeRenderer.renderBufferSize ?? '--';
+                document.getElementById('debugVideoDecodeQueueSize').textContent = video.activeRenderer.decodeQueueSize ?? '--';
+                document.getElementById('debugVideoLastRenderedTime').textContent =
+                  video.activeRenderer.lastRenderedTime ? (video.activeRenderer.lastRenderedTime / 1000000).toFixed(2) + 's' : '--';
+              } else {
+                document.getElementById('debugVideoRenderBufferSize').textContent = '--';
+                document.getElementById('debugVideoDecodeQueueSize').textContent = '--';
+                document.getElementById('debugVideoLastRenderedTime').textContent = '--';
+              }
+            }
+
+            // Clock
+            if (debugInfo.clock) {
+              document.getElementById('debugClockIsPlaying').textContent = debugInfo.clock.isPlaying ? 'Yes' : 'No';
+              document.getElementById('debugClockCurrentTime').textContent = debugInfo.clock.currentTime.toFixed(2) + 's';
+            }
+          } catch (error) {
+            console.error('Error updating debug info:', error);
+          }
+        }
+
+        // Update debug info every 500ms
+        debugUpdateInterval = setInterval(updateDebugInfo, 500);
+        updateDebugInfo(); // Initial update
       };
     });
   </script>

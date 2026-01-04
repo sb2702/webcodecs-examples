@@ -77,6 +77,13 @@ export class VideoWorker extends EventEmitter {
     await this.worker.sendMessage('seek', { time });
   }
 
+  /**
+   * Get debug information from the video worker
+   */
+  async getDebugInfo(): Promise<any> {
+    return await this.worker.sendMessage('get-debug-info', {});
+  }
+
 
   async setTrackData(videoMetadata: any, duration: number): Promise<void> {
     await this.worker.sendMessage('set-track-data', {

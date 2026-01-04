@@ -215,6 +215,26 @@ export default class VideoTransformer {
     }
 
     /**
+     * Get debug information about the current state
+     */
+    getDebugInfo() {
+
+        return {
+            currentChunkIndex: this.currentChunkIndex,
+            activeRenderer: this.activeRenderer ? {
+                renderBufferSize: this.activeRenderer.rendered_buffer.length,
+                decodeQueueSize: this.activeRenderer.decoder.decodeQueueSize,
+                currentChunk: this.activeRenderer.currentChunk,
+                lastRenderedTime: this.activeRenderer.lastRenderedTime
+
+            } : null,
+            totalRenderers: this.renderers.size,
+            loadedChunks: this.loadedChunks.size,
+            isPreloading: this.isPreloading
+        };
+    }
+
+    /**
      * Play the video (compatibility with VideoRenderer API)
      */
     play() {
@@ -420,6 +440,29 @@ self.onmessage = async function(event: MessageEvent) {
         self.postMessage({
           request_id,
           error: `Render error: ${error}`
+        });
+      }
+      break;
+
+    case "get-debug-info":
+      if (!transformer) {
+        self.postMessage({
+          request_id,
+          error: "VideoManager not initialized"
+        });
+        return;
+      }
+
+      try {
+        const debugInfo = transformer.getDebugInfo();
+        self.postMessage({
+          request_id,
+          res: debugInfo
+        });
+      } catch (error) {
+        self.postMessage({
+          request_id,
+          error: `Debug info error: ${error}`
         });
       }
       break;

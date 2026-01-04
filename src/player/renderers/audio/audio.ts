@@ -92,7 +92,7 @@ export class WebAudioPlayer extends EventEmitter {
         }
 
         // Finalize and get array buffer
-        muxer.finalize();
+        await muxer.finalize();
         return muxer.target.buffer;
     }
 
@@ -132,9 +132,16 @@ export class WebAudioPlayer extends EventEmitter {
 
 
         const a = performance.now();
+
+
             const muxedBuffer = await this.muxChunksToBuffer(chunks, this.audioConfig!);
+
+
+
             const b = performance.now();
             const audioBuffer = await this.audioContext!.decodeAudioData(muxedBuffer);
+
+            
             const c = performance.now();
             console.log(`Muxing took ${b - a}ms, Decoding took ${c - b}ms`);
             // Cache the decoded buffer

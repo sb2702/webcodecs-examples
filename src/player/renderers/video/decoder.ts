@@ -156,7 +156,6 @@ export default class VideoRenderer {
 
         this.lastRenderedTime = time;
 
-
         if(this.rendered_buffer.length > 0){
 
             const latest_frame = this.getLatestFrame(time);

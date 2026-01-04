@@ -32,6 +32,7 @@ export class WebCodecsPlayer extends EventEmitter {
   private audioPlayer: WebAudioPlayer | null = null;
   private worker: WorkerController | null = null;
   private clock: Clock | null = null;
+  private trackData: TrackData | null = null;
 
   constructor(params: WebCodecsPlayerParams) {
     super();
@@ -71,6 +72,38 @@ export class WebCodecsPlayer extends EventEmitter {
 
   getCurrentTime(): number {
     return this.clock?.getCurrentTime() || 0;
+  }
+
+  async getDebugInfo() {
+    const videoDebugInfo = this.renderer ? await this.renderer.getDebugInfo() : null;
+
+    return {
+      trackData: {
+        duration: this.duration,
+        audio: this.audioPlayer ? {
+          codec: this.audioPlayer.audioConfig?.codec,
+          sampleRate: this.audioPlayer.audioConfig?.sampleRate,
+          numberOfChannels: this.audioPlayer.audioConfig?.numberOfChannels,
+          startTime: this.audioPlayer.startTime,
+          pauseTime: this.audioPlayer.pauseTime,
+          isPlaying: this.audioPlayer.isPlaying,
+          currentBufferCount: this.audioPlayer.audioBuffers.size,
+          scheduledNodeCount: this.audioPlayer.scheduledNodes.size
+        } : null,
+        video: videoDebugInfo ? {
+          duration: this.renderer?.duration,
+          codec: this.trackData?.video?.codec,
+          width: this.trackData?.video?.codedWidth,
+          height: this.trackData?.video?.codedHeight,
+          frameRate: this.trackData?.video?.frameRate,
+          ...videoDebugInfo
+        } : null
+      },
+      clock: {
+        isPlaying: this.clock?.playing(),
+        currentTime: this.getCurrentTime()
+      }
+    };
   }
 
   terminate(){
@@ -119,6 +152,7 @@ export class WebCodecsPlayer extends EventEmitter {
     const trackData = <TrackData> await this.worker.sendMessage('get-tracks', {});
     console.log("Track data", trackData);
 
+    this.trackData = trackData;
     this.duration = trackData.duration;
 
     // Initialize video worker with port to file worker
