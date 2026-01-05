@@ -64,6 +64,9 @@ export class WebAudioPlayer {
 
         // Subscribe to Clock's tick events for segment preloading
         this.clock.on('tick', this.onClockTick.bind(this));
+        this.clock.on('pause', this.pause.bind(this));
+        this.clock.on('play', this.play.bind(this));
+        this.clock.on('seek', this.seek.bind(this));
 
         this.init();
     }
@@ -249,6 +252,7 @@ export class WebAudioPlayer {
 
     async seek(time: number) {
         const wasPlaying = this.isPlaying;
+        this.clearScheduledNodes();
 
         if (wasPlaying) {
             this.clearScheduledNodes();

@@ -23,9 +23,6 @@ export default class VideoRenderer {
     initP: Promise<void>
     constructor(metadata: VideoTrackData, chunks: EncodedVideoChunk[],  canvas: OffscreenCanvas) {
 
-
-        console.log(chunks[0])
-
         this.currentChunk =0;
         this.firstRendered = false;
 
@@ -233,10 +230,5 @@ export default class VideoRenderer {
         }
 
     }
-
-
-
-
-
 
 }

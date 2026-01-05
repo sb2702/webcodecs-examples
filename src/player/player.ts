@@ -155,21 +155,22 @@ export class WebCodecsPlayer extends EventEmitter {
     this.trackData = trackData;
     this.duration = trackData.duration;
 
-    // Initialize video worker with port to file worker
+    // Create clock to manage playback timing
+    // The clock coordinates audio and video using the audio timeline as source of truth
+    this.clock = new Clock(this.duration);
+
+    // Initialize video worker with port to file worker and clock
+    // Video worker subscribes to clock's tick events for rendering
     this.renderer = new VideoWorker({
-      src: this.file,
       canvas: this.canvas!,
-      fileWorkerPort: videoChannel.port2
+      fileWorkerPort: videoChannel.port2,
+      clock: this.clock
     });
 
     await this.renderer.initialize();
 
     // Send track metadata to video worker
     await this.renderer.setTrackData(trackData.video!, trackData.duration);
-
-    // Create clock to manage playback timing
-    // The clock coordinates audio and video using the audio timeline as source of truth
-    this.clock = new Clock(this.renderer, this.duration);
 
     // Initialize audio player with file worker and clock
     // Audio player subscribes to clock's tick events for segment preloading
@@ -188,6 +189,11 @@ export class WebCodecsPlayer extends EventEmitter {
     this.clock.on('tick', (time) => {
       this.emit('timeupdate', time);
     });
+
+    this.clock.on('seek', (time) => {
+      this.renderer.seek(time);
+    });
+
 
     this.clock.on('play', () => {
       this.emit('play');

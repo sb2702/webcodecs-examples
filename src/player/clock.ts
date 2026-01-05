@@ -1,6 +1,5 @@
 import EventEmitter from '../utils/EventEmitter';
-import { WebAudioPlayer } from './renderers/audio/audio';
-import { VideoWorker } from './renderers/video/video';
+import type { WebAudioPlayer } from './renderers/audio/audio';
 
 /**
  * Clock - Time Management for Video Playback
@@ -29,7 +28,6 @@ import { VideoWorker } from './renderers/video/video';
 export class Clock extends EventEmitter {
 
   private audioPlayer: WebAudioPlayer | null = null;
-  private videoWorker: VideoWorker;
   private isPlaying: boolean = false;
   private animationFrame: number | null = null;
   private duration: number;
@@ -41,13 +39,11 @@ export class Clock extends EventEmitter {
 
   /**
    * Create a new Clock
-   * @param videoWorker - Video worker for passive rendering
    * @param duration - Total video duration in seconds
    */
-  constructor(videoWorker: VideoWorker, duration: number) {
+  constructor(duration: number) {
     super();
 
-    this.videoWorker = videoWorker;
     this.duration = duration;
     this.FRAME_INTERVAL = 1000 / this.TARGET_FPS;
   }
@@ -111,11 +107,6 @@ export class Clock extends EventEmitter {
    */
   async seek(time: number): Promise<void> {
     const clampedTime = Math.max(0, Math.min(time, this.duration));
-
-    // Seek both video and audio
-    this.videoWorker.seek(clampedTime);
-    await this.audioPlayer.seek(clampedTime);
-
     this.emit('seek', clampedTime);
   }
 
@@ -174,13 +165,9 @@ export class Clock extends EventEmitter {
       return;
     }
 
-    // Emit tick event for UI updates
-    // UI should listen to this rather than polling getCurrentTime()
+    // Emit tick event for UI updates and renderers
+    // Both audio and video renderers subscribe to this event
     this.emit('tick', currentTime);
-
-    // Tell video worker to render at this time (passive)
-    // Video worker doesn't track time itself - it just renders whatever we tell it
-    this.videoWorker.render(currentTime);
 
     // Schedule next tick
     this.animationFrame = requestAnimationFrame(() => this.tick());
