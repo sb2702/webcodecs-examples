@@ -43,6 +43,7 @@
   "homepage": "https://www.webcodecsfundamentals.org",
   "devDependencies": {
     "@types/node": "^22.10.5",
+    "rollup-plugin-web-worker-loader": "^1.7.0",
     "typescript": "^5.8.3",
     "vite": "^6.2.6"
   },

@@ -1,5 +1,5 @@
 import EventEmitter from "../../../utils/EventEmitter";
-import VideoWorkerConstructor from './video.worker.ts?worker';
+import VideoWorkerConstructor from './video.worker.ts?worker&inline';
 import { WorkerController } from "../../../utils/WorkerController";
 
 export interface VideoWorkerParams {

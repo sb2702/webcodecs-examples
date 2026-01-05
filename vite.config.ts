@@ -10,11 +10,9 @@ export default defineConfig({
       fileName: 'index',
     },
     rollupOptions: {
-      // Bundle all dependencies into the library
+      // Bundle everything into single file
       output: {
-        // Ensure assets use relative paths
-        assetFileNames: 'assets/[name]-[hash][extname]',
-        chunkFileNames: 'assets/[name]-[hash].js',
+        inlineDynamicImports: true,
       },
     },
     sourcemap: true,
@@ -22,13 +20,5 @@ export default defineConfig({
   },
   worker: {
     format: 'es',
-    rollupOptions: {
-      output: {
-        inlineDynamicImports: false,
-      },
-    },
-  },
-  optimizeDeps: {
-    exclude: [],
   },
 });
