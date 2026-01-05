@@ -344,7 +344,7 @@
         }
         
         // Listen for time updates
-        videoPlayer.on('timeupdate', (time) => {
+        videoPlayer.on('tick', (time) => {
           if (!isDraggingSeekBar) {
             currentTimeEl.textContent = formatTime(time);
             if (videoDuration > 0) {

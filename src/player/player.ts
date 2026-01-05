@@ -23,7 +23,7 @@ export interface TrackData {
 
 
 
-export class WebCodecsPlayer extends EventEmitter {
+export class WebCodecsPlayer  {
   private canvas: HTMLCanvasElement | null = null;
   private params: WebCodecsPlayerParams;
   private file: File;
@@ -35,8 +35,7 @@ export class WebCodecsPlayer extends EventEmitter {
   private trackData: TrackData | null = null;
 
   constructor(params: WebCodecsPlayerParams) {
-    super();
-
+  
     this.params = params;
     this.worker = new WorkerController(workerUrl);
     this.file = params.src;
@@ -123,13 +122,10 @@ export class WebCodecsPlayer extends EventEmitter {
     if (this.renderer) {
       if (this.renderer instanceof VideoWorker) {
         this.renderer.terminate();
-      } else {
-        this.renderer.terminate();
-      }
+      } 
       this.renderer = null;
     }
 
-    this.emit('terminated');
   }
 
   async initialize(): Promise<void> {
@@ -180,21 +176,11 @@ export class WebCodecsPlayer extends EventEmitter {
     this.clock = new Clock(this.audioPlayer, this.renderer, this.duration);
 
     // Forward clock events to external listeners
-    this.clock.on('tick', (time) => {
-      this.emit('timeupdate', time);
-    });
 
-    this.clock.on('play', () => {
-      this.emit('play');
-    });
+  }
 
-    this.clock.on('pause', () => {
-      this.emit('pause');
-    });
-
-    this.clock.on('ended', () => {
-      this.emit('ended');
-    });
+  on(event, listener){
+    this.clock.on(event, listener)
   }
 
   // Add more methods as needed
