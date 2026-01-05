@@ -186,6 +186,7 @@ export class WebAudioPlayer {
     }
 
     clearScheduledNodes() {
+
         // Clear both audio nodes and preload timeouts
         for (const node of this.scheduledNodes.values()) {
             node.stop();
@@ -244,15 +245,17 @@ export class WebAudioPlayer {
     }
 
     async pause() {
-        this.clearScheduledNodes();
-        this.pauseTime = this.getCurrentTime();
         this.isPlaying = false;
+        this.clearScheduledNodes();
+        console.trace("Pausing");
+        this.pauseTime = this.getCurrentTime();
+
     }
 
 
     async seek(time: number) {
         const wasPlaying = this.isPlaying;
-        this.clearScheduledNodes();
+
 
         if (wasPlaying) {
             this.clearScheduledNodes();
@@ -274,6 +277,8 @@ export class WebAudioPlayer {
      * @param currentTime - Current playback time from audio timeline
      */
     private onClockTick(currentTime: number) {
+
+        console.log(this.scheduledNodes)
         const currentSegmentIndex = this.getCurrentSegmentIndex();
         const timeInCurrentSegment = currentTime % SEGMENT_DURATION;
 

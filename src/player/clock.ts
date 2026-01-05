@@ -87,10 +87,6 @@ export class Clock extends EventEmitter {
     if (!this.isPlaying) return;
 
     this.isPlaying = false;
-
-    // Pause audio
-    this.audioPlayer.pause();
-
     // Stop the tick loop
     if (this.animationFrame) {
       cancelAnimationFrame(this.animationFrame);
