@@ -1,4 +1,6 @@
 import VideoRenderer, { VideoTrackData } from "./decoder";
+import { GPUFrameRenderer } from 'webcodecs-utils';
+
 
 // Types
 interface TrackData {
@@ -46,6 +48,7 @@ export default class VideoTransformer {
     private isPreloading: boolean;
     private preloadThreshold: number;
     private rendering: boolean;
+    private frameRenderer: GPUFrameRenderer;
     private lastRenderedTime: number;
 
     // Request ID tracking
@@ -61,6 +64,7 @@ export default class VideoTransformer {
         this.canvas = canvas;
         this.filePort = filePort;
         this.videoMetadata = videoMetadata;
+        this.frameRenderer = new GPUFrameRenderer(this.canvas, { filterMode: 'linear' });
         this.duration = duration;
         this.renderers = new Map();
         this.loadedChunks = new Map();
@@ -108,6 +112,7 @@ export default class VideoTransformer {
         // Initialize with the first chunk
         await this.initializeChunk(0);
         await this.seek(0);
+        await this.frameRenderer.init();
     }
 
     /**
@@ -163,7 +168,8 @@ export default class VideoTransformer {
         const renderer = new VideoRenderer(
             this.videoMetadata,
             chunks,
-            this.canvas
+            this.canvas,
+            this.frameRenderer
         );
         
         // Store it in our map

@@ -17,11 +17,11 @@ export default class VideoRenderer {
     source_buffer: EncodedVideoChunk[] = [];
     rendered_buffer: VideoFrame[] = [];
     canvas: OffscreenCanvas;
-    renderer: GPUFrameRenderer;
+    frameRenderer: GPUFrameRenderer;
     decoder: VideoDecoder;
     metadata: VideoTrackData;
     initP: Promise<void>
-    constructor(metadata: VideoTrackData, chunks: EncodedVideoChunk[],  canvas: OffscreenCanvas) {
+    constructor(metadata: VideoTrackData, chunks: EncodedVideoChunk[],  canvas: OffscreenCanvas, frameRenderer: GPUFrameRenderer) {
 
 
         console.log(chunks[0])
@@ -34,12 +34,13 @@ export default class VideoRenderer {
 
         this.metadata = metadata;
 
+        this.frameRenderer = frameRenderer;
 
         this.canvas = canvas;
 
         // Initialize GPU renderer with linear filtering (hardware accelerated)
-        this.renderer = new GPUFrameRenderer(this.canvas, { filterMode: 'linear' });
-        this.initP = this.renderer.init();
+
+        this.initP = this.frameRenderer.init();
 
         this.decoder = this.setupDecoder(metadata)
 
@@ -225,7 +226,7 @@ export default class VideoRenderer {
             }
 
             // Use GPU renderer for zero-copy rendering
-            this.renderer.drawImage(frame);
+            this.frameRenderer.drawImage(frame);
             frame.close();
 
         } catch (e) {
