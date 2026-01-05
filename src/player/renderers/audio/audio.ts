@@ -21,7 +21,7 @@ export interface AudioPlayerArgs {
 }
 
 
-export class WebAudioPlayer extends EventEmitter {
+export class WebAudioPlayer {
 
 
     audioContext: AudioContext | null;
@@ -40,7 +40,6 @@ export class WebAudioPlayer extends EventEmitter {
     isPreloading: boolean;
     audioConfig: AudioTrackData | null;
     constructor(args: AudioPlayerArgs) {
-        super();
         this.audioContext = null;
         this.sourceNode = null;
         this.isPlaying = false;
@@ -274,7 +273,6 @@ export class WebAudioPlayer extends EventEmitter {
 
         const currentTime = this.getCurrentTime();
   
-        this.emit('time', currentTime);
 
         // Check if we need to preload the next segment
         const currentSegmentIndex = this.getCurrentSegmentIndex();
