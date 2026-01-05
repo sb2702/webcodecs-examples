@@ -5,12 +5,9 @@ import { resolve } from 'path';
 export default defineConfig({
   build: {
     lib: {
-      entry: {
-        index: resolve(__dirname, 'src/index.ts'),
-        'player/index': resolve(__dirname, 'src/player/index.ts'),
-      },
-      formats: ['es', 'umd'],
-      name: 'WebCodecsExamples',
+      entry: resolve(__dirname, 'src/index.ts'),
+      formats: ['es'],
+      fileName: 'index',
     },
     rollupOptions: {
       // Externalize dependencies that shouldn't be bundled

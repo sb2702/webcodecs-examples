@@ -3,18 +3,13 @@
   "version": "0.1.0",
   "description": "Production-ready WebCodecs implementation examples",
   "type": "module",
-  "main": "./dist/index.umd.js",
-  "module": "./dist/index.es.js",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "import": "./dist/index.es.js",
-      "require": "./dist/index.umd.js",
+      "import": "./dist/index.js",
       "types": "./dist/index.d.ts"
-    },
-    "./player": {
-      "import": "./dist/player/index.es.js",
-      "types": "./dist/player/index.d.ts"
     }
   },
   "files": [
