@@ -272,8 +272,6 @@ export class WebAudioPlayer {
         if (!this.isPlaying) return;
 
         const currentTime = this.getCurrentTime();
-  
-
         // Check if we need to preload the next segment
         const currentSegmentIndex = this.getCurrentSegmentIndex();
         const timeInCurrentSegment = currentTime % SEGMENT_DURATION;
