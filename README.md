@@ -4,17 +4,18 @@ Complete, production-ready WebCodecs implementation examples for [WebCodecs Fund
 
 ## Examples
 
-### 🎬 [Video Player](./player) *(in progress)*
+### 🎬 Video Player *(available)*
 Full-featured video player demonstrating:
-- Play/pause/seek controls
-- Audio-video synchronization
-- Worker-based decoding
-- GPU rendering
-- Timeline UI
-- Volume & playback speed controls
+- Play/pause/seek controls with Clock-based timing
+- Audio-video synchronization using Web Audio API timeline
+- Worker-based video decoding for performance
+- WebGPU rendering (GPUFrameRenderer from webcodecs-utils)
+- Segment-based audio loading (30s chunks)
+- MP4 demuxing with MP4Box
 
-**Live Demo**: Coming soon
-**Source**: [/player](./player)
+**Usage**: `import { WebCodecsPlayer } from 'webcodecs-examples'`
+**Demo**: `npm run dev`
+**Source**: [/src/player](./src/player)
 
 ---
 
@@ -59,17 +60,42 @@ These examples complement the [WebCodecs Fundamentals](https://webcodecsfundamen
 
 The fundamentals docs teach concepts. These examples show production implementation.
 
-## Quick Start
+## Installation
+
+### As an npm package
 
 ```bash
-# Clone the repo
+npm install webcodecs-examples
+```
+
+```typescript
+import { WebCodecsPlayer } from 'webcodecs-examples';
+
+const player = new WebCodecsPlayer({
+  src: videoFile,
+  canvas: document.querySelector('canvas')
+});
+
+await player.initialize();
+await player.play();
+```
+
+### Via CDN
+
+```html
+<script type="module">
+  import { WebCodecsPlayer } from 'https://esm.sh/webcodecs-examples';
+  // Use WebCodecsPlayer...
+</script>
+```
+
+### Clone and run locally
+
+```bash
 git clone https://github.com/sb2702/webcodecs-examples.git
 cd webcodecs-examples
-
-# Run the player example
-cd player
 npm install
-npm run dev
+npm run dev  # Run player demo
 ```
 
 ## Related Projects

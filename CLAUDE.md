@@ -14,18 +14,29 @@ WebCodecs Fundamentals teaches concepts and theory. This repo provides working r
 
 ```
 webcodecs-examples/
-├── player/           # Full-featured video player with WebCodecs
-├── transcoding/      # Video transcoding example
-├── editing/          # Video editing with timeline (future)
-├── live-streaming/   # Live streaming example (future)
-└── shared/           # Shared utilities (if needed)
+├── src/
+│   ├── player/           # Full-featured video player with WebCodecs (COMPLETE)
+│   │   ├── player.ts     # Main WebCodecsPlayer class
+│   │   ├── clock.ts      # Clock manages timing, emits tick events
+│   │   ├── file.ts       # Worker: MP4 demuxing with MP4Box
+│   │   └── renderers/
+│   │       ├── audio/    # Web Audio playback with segment loading
+│   │       └── video/    # VideoDecoder in worker + GPU rendering
+│   ├── transcoding/      # Video transcoding (IN PROGRESS)
+│   ├── utils/            # Shared utilities
+│   │   ├── WorkerController.ts  # Worker communication helper
+│   │   └── EventEmitter.ts      # Simple event emitter
+│   └── index.ts          # Main package entry (exports WebCodecsPlayer)
+├── demos/
+│   └── player/           # Standalone demo for player
+└── dist/                 # Built package (single index.js with inlined workers)
 ```
 
-Each example is:
-- Self-contained with its own package.json
-- Deployable independently
-- Well-documented with inline comments
-- Production-quality code (not just demos)
+**Current architecture**:
+- Published as npm package with single-file build (workers inlined using `?worker&inline`)
+- Uses `webcodecs-utils` for GPUFrameRenderer
+- Clock-based event-driven architecture (audio & video subscribe to tick events)
+- Workers loaded via `?worker&inline` for CDN compatibility
 
 ## Related Projects
 
@@ -65,11 +76,11 @@ Key pages that will reference these examples:
 - `src/file.ts` - File handling worker
 - `demo/` - Demo implementation
 
-**TODO**: Clean up and migrate to `/player` in this repo
+**Status**: Migrated and cleaned up to `/src/player` ✓
 
-## Example: Player
+## Example: Player (COMPLETE)
 
-The player example will be the cleaned-up version of WebCodecsPlayerPublic with:
+The player example is a cleaned-up, production-ready version with:
 
 **Core Features**:
 - Play/pause/seek controls
@@ -80,24 +91,31 @@ The player example will be the cleaned-up version of WebCodecsPlayerPublic with:
 - Volume control
 - Playback speed control with pitch correction (SoundTouch)
 
-**Architecture** (from existing code):
+**Architecture**:
 ```
 Main Thread:
-├── WebCodecsPlayer - Main controller
-├── VideoWorker - Manages video decoder worker
-├── WebAudioPlayer - Audio playback & timeline
-└── Canvas - Video rendering target
+├── WebCodecsPlayer - Main controller (src/player/player.ts)
+├── Clock - Timing coordinator, emits 'tick' events at 30fps (src/player/clock.ts)
+├── VideoWorker - Wrapper for video decoder worker (src/player/renderers/video/video.ts)
+├── WebAudioPlayer - Audio playback with segment loading (src/player/renderers/audio/audio.ts)
+└── Canvas - Video rendering target (OffscreenCanvas)
 
-Worker Thread:
-└── file.ts worker - MP4 demuxing with MP4Box
+Worker Threads:
+├── file.ts - MP4 demuxing with MP4Box (MessagePort communication)
+└── video.worker.ts - VideoDecoder + GPUFrameRenderer
+
+Event Flow:
+Clock.tick() → emits 'tick' event → [AudioPlayer, VideoWorker].onClockTick()
 ```
 
-**Key Implementation Details** (from WebCodecsPlayerPublic):
-- Uses `VideoDecoder` in worker for frame decoding
-- Audio playback via Web Audio API (not WebCodecs AudioDecoder)
-- Sync mechanism: Audio timeline drives video rendering
-- Decode buffer management to prevent memory issues
-- Frame dropping when decoder can't keep up
+**Key Implementation Details**:
+- **Clock pattern**: Single `requestAnimationFrame` loop (30fps), both renderers subscribe to tick events
+- **Audio timeline as source of truth**: `AudioContext.currentTime` provides sub-millisecond timing
+- **Segment-based audio loading**: 30-second chunks loaded on-demand (not EncodedAudioChunk)
+- **GPU rendering**: Uses `GPUFrameRenderer` from webcodecs-utils for zero-copy rendering
+- **Worker communication**: MessagePort for file worker ↔ video worker, WorkerController helper
+- **Terminology**: "segments" = time-based blocks (30s), not confused with EncodedAudioChunk
+- **CDN-ready**: Workers inlined using `?worker&inline` for single-file distribution
 
 ## Example: Transcoding
 
@@ -222,15 +240,33 @@ Each example should be deployable to:
 - GitHub Pages (alternative)
 - Embeddable via iframe in fundamentals docs
 
+## Build & Deployment
+
+**Build configuration** (vite.config.ts):
+- Single entry point: `src/index.ts`
+- ES module format only
+- Workers inlined using `?worker&inline` syntax
+- All dependencies bundled (mp4box, mp4-muxer, localforage)
+- Output: Single `dist/index.js` file (~1.8MB with inlined workers)
+
+**Publishing**:
+```bash
+npm run build   # Build single file
+npm publish     # Publish to npm
+```
+
+**CDN usage**: Works with esm.sh, unpkg, etc. because workers are inlined
+
 ## Next Steps
 
-1. **Clean up WebCodecsPlayerPublic** → `/player`
-   - Remove Katana-specific code
-   - Add comprehensive comments
-   - Create standalone demo
-   - Write README
+1. ✅ **Player** - Complete and published
+   - [x] Clean up and migrate code
+   - [x] Clock-based architecture
+   - [x] GPU rendering with webcodecs-utils
+   - [x] Single-file CDN build
+   - [x] Published to npm
 
-2. **Extract transcoding from production app** → `/transcoding`
+2. **Extract transcoding from production app** → `/src/transcoding`
    - Simplify to core transcoding logic
    - Remove app-specific UI
    - Create minimal UI for demo
