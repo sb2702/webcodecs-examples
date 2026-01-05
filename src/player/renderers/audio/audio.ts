@@ -216,11 +216,7 @@ export class WebAudioPlayer {
         const sourceNode = this.audioContext!.createBufferSource();
         sourceNode.buffer = audioBuffer;
         sourceNode.connect(this.audioContext!.destination);
-
-        const currentTime = this.audioContext!.currentTime;
         const playbackTime = this.startTime + (startTime - this.pauseTime);
-
-        console.log("Scheduling segment at time", playbackTime, "with offset", offset);
         sourceNode.start(playbackTime, offset);
         this.scheduledNodes.set(startTime, sourceNode);
 
@@ -240,25 +236,17 @@ export class WebAudioPlayer {
     async pause() {
         this.clearScheduledNodes();
         this.pauseTime = this.getCurrentTime();
-   
         this.isPlaying = false;
     }
 
   
     async seek(time: number) {
-
-
-
-       
-        const wasPlaying = this.isPlaying;
-        
+        const wasPlaying = this.isPlaying;    
         if (wasPlaying) {
             this.clearScheduledNodes();
             this.isPlaying = false;
         }
-
         this.pauseTime = time;
-
         if (wasPlaying) {
             this.startTime = this.audioContext!.currentTime;
             this.isPlaying = true;
@@ -268,25 +256,18 @@ export class WebAudioPlayer {
     }
 
 
-    updatePlaybackPosition() {
-
-    
+    checkForPreLoad() {
         if (!this.isPlaying) return;
-
         const currentTime = this.getCurrentTime();
         // Check if we need to preload the next segment
         const currentSegmentIndex = this.getCurrentSegmentIndex();
         const timeInCurrentSegment = currentTime % SEGMENT_DURATION;
 
-
         if (timeInCurrentSegment >= (SEGMENT_DURATION - this.preloadThreshold) &&
             !this.isPreloading &&
             !this.audioSegments.has(currentSegmentIndex + 1)) {
-
             this.preloadNextSegment((currentSegmentIndex + 1) * SEGMENT_DURATION);
-        }
-
-      
+        }      
     }
 
     getCurrentTime() {

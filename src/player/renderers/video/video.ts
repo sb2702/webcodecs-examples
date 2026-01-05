@@ -1,8 +1,6 @@
 import EventEmitter from "../../../utils/EventEmitter";
-import { v4 as uuidv4 } from 'uuid';
 import workerUrl from './video.worker.ts?worker&url';
 import { WorkerController } from "../../../utils/WorkerController";
-import { TrackData } from "../../player";
 
 export interface VideoWorkerParams {
   src: File;
@@ -19,25 +17,14 @@ export interface VideoWorkerParams {
 export class VideoWorker extends EventEmitter {
   private canvas: HTMLCanvasElement;
   private offscreenCanvas: OffscreenCanvas | null = null;
-  private file: File;
   public duration: number = 0;
   private worker: WorkerController;
-  private callbacks: Record<string, (result: any) => void> = {};
-  private animationFrame: number | null = null;
-  private lastRenderTime: number = 0;
-  private isPlaying: boolean = false;
-  private playStartTime: number = 0;
-  private pauseTime: number = 0;
-
   private fileWorkerPort: MessagePort;
 
   constructor(params: VideoWorkerParams) {
     super();
     this.canvas = params.canvas;
-    this.file = params.src;
     this.fileWorkerPort = params.fileWorkerPort;
-
-    // Create the worker
     this.worker = new WorkerController(workerUrl);
   }
   
@@ -55,13 +42,11 @@ export class VideoWorker extends EventEmitter {
     this.offscreenCanvas = this.canvas.transferControlToOffscreen();
 
     // Initialize the worker with the offscreen canvas and file worker port
-    console.log("Initializing worker", this.offscreenCanvas);
     const initialized = await this.worker.sendMessage('init', {
       canvas: this.offscreenCanvas,
       fileWorkerPort: this.fileWorkerPort
     }, [this.offscreenCanvas, this.fileWorkerPort]);
 
-    console.log("Initialized", initialized);
 
     // Emit initialization event
     this.emit('initialized', initialized);
