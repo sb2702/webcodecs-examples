@@ -26,8 +26,11 @@ export class WorkerController {
   private persistentEvents: string[];
   private port?: MessagePort;
 
-  constructor(workerUrl: string | URL, persistentEvents: string[] = [], port?: MessagePort) {
-    this.worker = new Worker(workerUrl, { type: 'module' });
+  constructor(workerUrlOrConstructor: string | URL | (new () => Worker), persistentEvents: string[] = [], port?: MessagePort) {
+    // Support both Worker constructor (from ?worker) and URL (from ?worker&url)
+    this.worker = typeof workerUrlOrConstructor === 'function'
+      ? new workerUrlOrConstructor()
+      : new Worker(workerUrlOrConstructor, { type: 'module' });
     this.listeners = {};
     this.persistentEvents = persistentEvents;
 

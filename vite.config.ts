@@ -11,6 +11,11 @@ export default defineConfig({
     },
     rollupOptions: {
       // Bundle all dependencies into the library
+      output: {
+        // Ensure assets use relative paths
+        assetFileNames: 'assets/[name]-[hash][extname]',
+        chunkFileNames: 'assets/[name]-[hash].js',
+      },
     },
     sourcemap: true,
     outDir: 'dist',

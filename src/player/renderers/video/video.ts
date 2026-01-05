@@ -1,5 +1,5 @@
 import EventEmitter from "../../../utils/EventEmitter";
-import workerUrl from './video.worker.ts?worker&url';
+import VideoWorkerConstructor from './video.worker.ts?worker';
 import { WorkerController } from "../../../utils/WorkerController";
 
 export interface VideoWorkerParams {
@@ -25,7 +25,7 @@ export class VideoWorker extends EventEmitter {
     super();
     this.canvas = params.canvas;
     this.fileWorkerPort = params.fileWorkerPort;
-    this.worker = new WorkerController(workerUrl);
+    this.worker = new WorkerController(VideoWorkerConstructor);
   }
   
 
