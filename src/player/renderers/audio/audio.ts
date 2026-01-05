@@ -195,8 +195,10 @@ export class WebAudioPlayer {
         const nextSegmentIndex = Math.floor(startTime / SEGMENT_DURATION);
 
         // Check if we already have this segment cached
-        if (this.audioSegments.has(nextSegmentIndex)) return;
-
+        if (this.audioSegments.has(nextSegmentIndex)) {
+            this.scheduleSegment(this.audioSegments.get(nextSegmentIndex), startTime, 0);
+            return;
+        }
         this.isPreloading = true;
         try {
             const nextSegment = await this.loadSegment(startTime);
@@ -276,9 +278,11 @@ export class WebAudioPlayer {
         const currentSegmentIndex = this.getCurrentSegmentIndex();
         const timeInCurrentSegment = currentTime % SEGMENT_DURATION;
 
+
         if (timeInCurrentSegment >= (SEGMENT_DURATION - this.preloadThreshold) &&
             !this.isPreloading &&
             !this.audioSegments.has(currentSegmentIndex + 1)) {
+
             this.preloadNextSegment((currentSegmentIndex + 1) * SEGMENT_DURATION);
         }
 
