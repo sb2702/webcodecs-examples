@@ -174,6 +174,7 @@ export class Clock extends EventEmitter {
     // Tell video worker to render at this time (passive)
     // Video worker doesn't track time itself - it just renders whatever we tell it
     this.videoWorker.render(currentTime);
+    this.audioPlayer.updatePlaybackPosition();
 
     // Schedule next tick
     this.animationFrame = requestAnimationFrame(() => this.tick());

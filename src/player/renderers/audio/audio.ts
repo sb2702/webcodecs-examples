@@ -30,7 +30,6 @@ export class WebAudioPlayer extends EventEmitter {
     startTime: number;
     pauseTime: number;
     duration: number;
-    animationFrame: number | null;
     encodedChunks: EncodedAudioChunk[]; // EncodedAudioChunks from current segment
     audioSegments: Map<number, AudioBuffer>; // Decoded audio segments (segmentIndex -> AudioBuffer)
     scheduledNodes: Map<number, AudioBufferSourceNode>;
@@ -48,7 +47,6 @@ export class WebAudioPlayer extends EventEmitter {
         this.startTime = 0;
         this.pauseTime = 0;
         this.duration = args.duration;
-        this.animationFrame = null;
         this.audioConfig = args.audioConfig;
 
         this.encodedChunks = [];
@@ -236,14 +234,10 @@ export class WebAudioPlayer extends EventEmitter {
         this.startTime = this.audioContext!.currentTime;
         await this.startPlayback();
         this.isPlaying = true;
-        this.updatePlaybackPosition();
     }
 
     async pause() {
         this.clearScheduledNodes();
-        if (this.animationFrame) {
-            cancelAnimationFrame(this.animationFrame);
-        }
         this.pauseTime = this.getCurrentTime();
    
         this.isPlaying = false;
@@ -263,7 +257,6 @@ export class WebAudioPlayer extends EventEmitter {
         }
 
         this.pauseTime = time;
-        this.updateTimeDisplay(time);
 
         if (wasPlaying) {
             this.startTime = this.audioContext!.currentTime;
@@ -273,6 +266,7 @@ export class WebAudioPlayer extends EventEmitter {
         }
     }
 
+
     updatePlaybackPosition() {
 
     
@@ -280,9 +274,6 @@ export class WebAudioPlayer extends EventEmitter {
 
         const currentTime = this.getCurrentTime();
   
-
-
-
         this.emit('time', currentTime);
 
         // Check if we need to preload the next segment
@@ -295,13 +286,7 @@ export class WebAudioPlayer extends EventEmitter {
             this.preloadNextSegment((currentSegmentIndex + 1) * SEGMENT_DURATION);
         }
 
-        if (currentTime < this.duration) {
-            this.animationFrame = requestAnimationFrame(
-                this.updatePlaybackPosition.bind(this)
-            );
-        } else {
-            this.pause();
-        }
+      
     }
 
     getCurrentTime() {
@@ -309,10 +294,6 @@ export class WebAudioPlayer extends EventEmitter {
         return this.pauseTime + (this.audioContext!.currentTime - this.startTime);
     }
 
-    updateTimeDisplay(currentTime) {
 
-        console.log("Updating time display", currentTime);
-
-    }
 }
 
