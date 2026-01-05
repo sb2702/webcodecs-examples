@@ -10,15 +10,7 @@ export default defineConfig({
       fileName: 'index',
     },
     rollupOptions: {
-      // Externalize dependencies that shouldn't be bundled
-      external: ['localforage', 'mp4box', 'mp4-muxer'],
-      output: {
-        globals: {
-          localforage: 'localforage',
-          mp4box: 'MP4Box',
-          'mp4-muxer': 'Mp4Muxer',
-        },
-      },
+      // Bundle all dependencies into the library
     },
     sourcemap: true,
     outDir: 'dist',
