@@ -1,6 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
 
-type Listener = (args: any) => void;
+type Listener = (args?: any) => void;
 
 export default class EventEmitter {
     listeners: Record<string, Record<string, Listener>> = {};
@@ -31,7 +31,7 @@ export default class EventEmitter {
     /**
      * Emit an event to all registered listeners
      */
-    emit(event: string, args: any): void {
+    emit(event: string, args?: any): void {
         if (this.listeners[event]) {
             Object.values(this.listeners[event]).forEach(listener => {
                 listener(args);
