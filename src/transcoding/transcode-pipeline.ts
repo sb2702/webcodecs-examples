@@ -223,10 +223,10 @@ class VideoEncoderStream extends TransformStream<
 
 
 /**
- * Create a WritableStream that feeds encoded chunks to the muxer
+ * Create a WritableStream that feeds video chunks to the muxer
  * Handles progress reporting and video chunk writing
  */
-function createMuxerWriter(
+function createVideoMuxerWriter(
   muxer: Muxer<StreamTarget>,
   options?: { onProgress?: (progress: TranscodeProgress) => void }
 ): WritableStream<{ chunk: EncodedVideoChunk; meta: EncodedVideoChunkMetadata }> {
@@ -289,12 +289,39 @@ function createMuxerWriter(
     },
 
     close() {
-      // Don't finalize muxer here - caller needs to add audio chunks first
       console.log('All video frames written to muxer');
     },
 
     abort(reason) {
-      console.error('Muxer writer aborted:', reason);
+      console.error('Video muxer writer aborted:', reason);
+    }
+  });
+}
+
+/**
+ * Create a WritableStream that feeds audio chunks to the muxer
+ * Simple pass-through - no transcoding needed
+ */
+function createAudioMuxerWriter(
+  muxer: Muxer<StreamTarget>
+): WritableStream<EncodedAudioChunk> {
+  let audioChunkCount = 0;
+
+  return new WritableStream({
+    async write(chunk) {
+      // Add audio chunk to muxer (pass-through)
+      if(chunk.timestamp >= 0){
+        muxer.addAudioChunk(chunk);
+      }
+      audioChunkCount++;
+    },
+
+    close() {
+      console.log(`All ${audioChunkCount} audio chunks written to muxer`);
+    },
+
+    abort(reason) {
+      console.error('Audio muxer writer aborted:', reason);
     }
   });
 }
@@ -456,19 +483,19 @@ export async function transcodePipeline(
     .pipeThrough(new VideoRenderStream())
     .pipeThrough(new VideoEncoderStream(videoEncoderConfig));
 
-  // Step 6: Pipe to muxer writer
-  const writer = createMuxerWriter(muxer, {
+  // Step 6: Pipe video to muxer writer
+  const videoWriter = createVideoMuxerWriter(muxer, {
     onProgress: options?.onProgress
   });
 
-  await encodedStream.pipeTo(writer);
+  await encodedStream.pipeTo(videoWriter);
 
-  // Step 7: Add audio chunks (pass-through)
-  if (audioChunks && audioConfig) {
-    console.log('Adding audio chunks...');
-    for (const audio_chunk of audioChunks) {
-      muxer.addAudioChunk(audio_chunk);
-    }
+  // Step 7: Pipe audio to muxer writer (pass-through, no transcoding)
+  if (audioConfig) {
+    console.log('Streaming audio chunks...');
+    const audioStream = <ReadableStream<EncodedAudioChunk>> demuxer.read('audio', 0);
+    const audioWriter = createAudioMuxerWriter(muxer);
+    await audioStream.pipeTo(audioWriter);
   }
 
   // Step 8: Finalize
