@@ -1,4 +1,4 @@
-import { getBitrate, InMemoryStorage } from 'webcodecs-utils';
+import { getBitrate, InMemoryStorage, getCodecString } from 'webcodecs-utils';
 import { WebDemuxer } from "web-demuxer";
 import { Muxer, StreamTarget } from 'mp4-muxer';
 
@@ -456,7 +456,7 @@ export async function transcodePipeline(
   const bitrate = getBitrate(width, height, 30, 'good');
 
   const videoEncoderConfig: VideoEncoderConfig = {
-    codec: 'avc1.42001f',
+    codec: getCodecString('avc', width, height, bitrate),
     width: width,
     height: height,
     bitrate: Math.round(bitrate),
