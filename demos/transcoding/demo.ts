@@ -14,7 +14,7 @@ async function loadDemoFile() {
     console.log('Loaded demo file:', file.name, file.size, 'bytes');
 
     // Transcode the file
-    const result = await transcodeFile(file);
+    const result = await transcodeFile(file, 'pipeline');
 
     console.log('Transcoding complete:', result);
 
