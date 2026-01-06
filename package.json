@@ -51,6 +51,6 @@
     "localforage": "^1.10.0",
     "mp4-muxer": "^5.2.1",
     "mp4box": "^0.5.4",
-    "webcodecs-utils": "^0.1.4"
+    "webcodecs-utils": "^0.1.5"
   }
 }

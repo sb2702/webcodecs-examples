@@ -244,7 +244,13 @@ class MP4DemuxerStream extends ReadableStream<EncodedVideoChunk> {
         console.log("Current Time", currentTime)
         console.log("End time", endTime)
 
-        const chunks = await demuxer.extractSegment('video', currentTime, endTime);
+        const chunksg = await demuxer.extractSegment('video', currentTime, endTime);
+
+        const chunks = chunksg.filter((c)=>c.timestamp/1e6 >= currentTime && c.timestamp/1e6 <= endTime);
+
+      //  const chunks = chunksg;
+
+
 
         console.log("Chuanks", chunks.length)
 
