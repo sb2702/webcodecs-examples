@@ -208,20 +208,74 @@ class VideoEncoderStream extends TransformStream<
 }
 
 /**
- * Transcode using Web Streams pipeline
+ * ReadableStream that demuxes MP4 file in segments
+ * Loads video chunks on-demand in time-based segments rather than all at once
+ */
+class MP4DemuxerStream extends ReadableStream<EncodedVideoChunk> {
+  constructor(file: File, segmentDuration = 30) {
+    let demuxer: MP4Demuxer;
+    let currentTime = 0;
+    let duration = 0;
+
+    super({
+      async start(controller) {
+
+        console.log("Running start")
+        demuxer = new MP4Demuxer(file);
+        await demuxer.load();
+        const tracks = demuxer.getTracks();
+        duration = tracks.duration;
+        console.log(`MP4DemuxerStream: Duration ${duration}s, will stream in ${segmentDuration}s segments`);
+      },
+
+      async pull(controller) {
+        // pull() is called automatically when downstream is ready for more data
+        if (currentTime >= duration) {
+          console.log('MP4DemuxerStream: All segments loaded, closing stream');
+          controller.close();
+          return;
+        }
+
+        // Extract next segment (e.g., 30 seconds worth of chunks)
+        const endTime = Math.min(currentTime + segmentDuration, duration);
+        console.log(`MP4DemuxerStream: Loading segment ${currentTime.toFixed(1)}s - ${endTime.toFixed(1)}s`);
+
+
+        console.log("Current Time", currentTime)
+        console.log("End time", endTime)
+
+        const chunks = await demuxer.extractSegment('video', currentTime, endTime);
+
+        console.log("Chuanks", chunks.length)
+
+
+        // Enqueue all chunks from this segment
+        for (const chunk of chunks) {
+          controller.enqueue(chunk);
+        }
+
+        currentTime = endTime;
+      }
+    }, {
+      highWaterMark: 20  // Buffer up to 20 chunks before applying backpressure
+    });
+  }
+}
+
+/**
+ * Transcode using Web Streams pipeline with segment-based streaming
  */
 export async function transcodePipeline(file: File): Promise<Blob> {
-  console.log('Starting transcode with Streams Pipeline pattern');
+  console.log('Starting transcode with Streams Pipeline pattern (segment-based streaming)');
 
-  // Step 1: Demux the input file
+  // Step 1: Set up demuxer to get metadata
   const demuxer = new MP4Demuxer(file);
   await demuxer.load();
 
   const trackData = demuxer.getTracks();
   const videoDecoderConfig = demuxer.getVideoDecoderConfig();
-  const videoChunks = await demuxer.extractSegment('video', 0, trackData.duration);
 
-  console.log(`Processing ${videoChunks.length} video chunks`);
+  console.log(`Video: ${trackData.duration}s, will stream in 30s segments`);
 
   // Step 2: Extract audio chunks (pass-through)
   let audioChunks: EncodedAudioChunk[] | null = null;
@@ -268,18 +322,11 @@ export async function transcodePipeline(file: File): Promise<Blob> {
     framerate: trackData.video.frameRate || 30,
   };
 
-  // Step 5: Create the pipeline!
-  // Chunks → Decoder → Render → Encoder → Muxer
+  // Step 5: Create the pipeline with segment-based streaming!
+  // MP4DemuxerStream → Decoder → Render → Encoder → Muxer
 
-  // Create a ReadableStream from video chunks
-  const chunkStream = new ReadableStream<EncodedVideoChunk>({
-    start(controller) {
-      for (const chunk of videoChunks) {
-        controller.enqueue(chunk);
-      }
-      controller.close();
-    },
-  });
+  // Create streaming demuxer (loads 30s segments on-demand)
+  const chunkStream = new MP4DemuxerStream(file, 30);
 
   // Build the pipeline with automatic backpressure
   const encodedStream = chunkStream
@@ -308,20 +355,16 @@ export async function transcodePipeline(file: File): Promise<Blob> {
 
 
 
-      // Progress logging
+      // Progress logging (estimate based on duration since we don't know total chunks upfront)
       if (frameCount % 30 === 0) {
-
         if(encoder && decoder){
           console.log(`Encoder queue size ${encoder.encodeQueueSize}`);
           console.log(`Decoder decode size ${decoder.decodeQueueSize}`)
-
         }
-   
-        const progress = ((frameCount / videoChunks.length) * 100).toFixed(1);
+
         const elapsed = performance.now() - startTime;
         const rate = frameCount / (elapsed / 1000);
-        const eta = ((videoChunks.length - frameCount) / rate).toFixed(1);
-        console.log(`Progress: ${progress}% (${frameCount}/${videoChunks.length}) - ETA: ${eta}s`);
+        console.log(`Progress: ${frameCount} frames, ${(elapsed / 1000).toFixed(1)}s elapsed, ${rate.toFixed(1)} fps`);
       }
     }
   } finally {
