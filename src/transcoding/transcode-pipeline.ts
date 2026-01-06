@@ -30,9 +30,12 @@ let encoderController: TransformStreamDefaultController<{ chunk: EncodedVideoChu
 /**
  * TransformStream that tracks demuxed chunks before decoding
  * Provides visibility into demuxer → decoder buffer and applies backpressure
+ * Adds frame index to each chunk
  */
-class DemuxerTrackingStream extends TransformStream<EncodedVideoChunk, EncodedVideoChunk> {
+class DemuxerTrackingStream extends TransformStream<EncodedVideoChunk, { chunk: EncodedVideoChunk; index: number }> {
   constructor() {
+    let chunkIndex = 0;
+
     super(
       {
         start(controller) {
@@ -46,8 +49,8 @@ class DemuxerTrackingStream extends TransformStream<EncodedVideoChunk, EncodedVi
             await new Promise((r) => setTimeout(r, 10));
           }
 
-          // Pass chunk through unchanged
-          controller.enqueue(chunk);
+          // Pass chunk with index
+          controller.enqueue({ chunk, index: chunkIndex++ });
         },
       },
       { highWaterMark: 20 } // Buffer up to 20 chunks from demuxer
@@ -58,14 +61,15 @@ class DemuxerTrackingStream extends TransformStream<EncodedVideoChunk, EncodedVi
 /**
  * TransformStream that decodes video chunks into frames
  * Handles decoder warm-up and maintains buffer
+ * Passes frame index through
  */
-class VideoDecoderStream extends TransformStream<EncodedVideoChunk, VideoFrame> {
+class VideoDecoderStream extends TransformStream<{ chunk: EncodedVideoChunk; index: number }, { frame: VideoFrame; index: number }> {
   constructor(config: VideoDecoderConfig) {
     // Declare variables in closure scope
-
-    let warmupChunks: EncodedVideoChunk[] = [];
+    let warmupItems: { chunk: EncodedVideoChunk; index: number }[] = [];
     let warmupComplete = false;
     const WARMUP_SIZE = 20;
+    let pendingIndices: number[] = [];
 
     super(
       {
@@ -75,8 +79,9 @@ class VideoDecoderStream extends TransformStream<EncodedVideoChunk, VideoFrame> 
 
           decoder = new VideoDecoder({
             output: (frame) => {
-              // Directly enqueue to TransformStream buffer!
-              controller.enqueue(frame);
+              // Match frame with its index (FIFO order)
+              const index = pendingIndices.shift()!;
+              controller.enqueue({ frame, index });
             },
             error: (e) => {
               console.error('Decoder error:', e);
@@ -87,14 +92,17 @@ class VideoDecoderStream extends TransformStream<EncodedVideoChunk, VideoFrame> 
           decoder.configure(config);
         },
 
-        async transform(chunk, controller) {
+        async transform(item, controller) {
           // Warm-up phase: collect first N chunks before starting output
           if (!warmupComplete) {
-            warmupChunks.push(chunk);
+            warmupItems.push(item);
 
-            if (warmupChunks.length >= WARMUP_SIZE) {
+            if (warmupItems.length >= WARMUP_SIZE) {
               // Decode all warmup chunks at once
-              warmupChunks.forEach((c) => decoder.decode(c));
+              warmupItems.forEach(({ chunk, index }) => {
+                pendingIndices.push(index);
+                decoder.decode(chunk);
+              });
               warmupComplete = true;
             }
             return;
@@ -111,9 +119,9 @@ class VideoDecoderStream extends TransformStream<EncodedVideoChunk, VideoFrame> 
             await new Promise((r) => setTimeout(r, 10));
           }
 
-          // Now it's safe to decode
-          // Frame will be enqueued automatically by decoder.output callback
-          decoder.decode(chunk);
+          // Track this frame's index and decode
+          pendingIndices.push(item.index);
+          decoder.decode(item.chunk);
         },
 
         async flush(controller) {
@@ -135,8 +143,9 @@ class VideoDecoderStream extends TransformStream<EncodedVideoChunk, VideoFrame> 
 /**
  * TransformStream that processes/renders video frames
  * Placeholder for GPU processing, filters, upscaling, etc.
+ * Passes frame index through
  */
-class VideoRenderStream extends TransformStream<VideoFrame, VideoFrame> {
+class VideoRenderStream extends TransformStream<{ frame: VideoFrame; index: number }, { frame: VideoFrame; index: number }> {
   constructor() {
     super(
       {
@@ -145,11 +154,10 @@ class VideoRenderStream extends TransformStream<VideoFrame, VideoFrame> {
           renderController = controller;
         },
 
-        async transform(frame, controller) {
+        async transform(item, controller) {
           // Placeholder: currently just passes through
           // TODO: Add WebGPU processing, filters, etc.
-          const processed = frame;
-          controller.enqueue(processed);
+          controller.enqueue(item);
         },
       },
       { highWaterMark: 5 } // Keep render buffer small
@@ -166,15 +174,13 @@ class VideoRenderStream extends TransformStream<VideoFrame, VideoFrame> {
 /**
  * TransformStream that encodes video frames into chunks
  * Handles encoder queue backpressure
+ * Uses frame index to determine keyframes
  */
 class VideoEncoderStream extends TransformStream<
-  VideoFrame,
+  { frame: VideoFrame; index: number },
   { chunk: EncodedVideoChunk; meta: EncodedVideoChunkMetadata }
 > {
   constructor(config: VideoEncoderConfig) {
-    // Declare variables in closure scope
-  
-
     super(
       {
         start(controller) {
@@ -185,7 +191,6 @@ class VideoEncoderStream extends TransformStream<
             output: (chunk, meta) => {
               // Directly enqueue to TransformStream buffer!
               controller.enqueue({ chunk, meta });
-
             },
             error: (e) => {
               console.error('Encoder error:', e);
@@ -196,8 +201,7 @@ class VideoEncoderStream extends TransformStream<
           encoder.configure(config);
         },
 
-        async transform(frame, controller) {
-
+        async transform(item, controller) {
           // Backpressure checks BEFORE encoding:
           // 1. Check encoder's internal queue
           while (encoder.encodeQueueSize >= 20) {
@@ -209,10 +213,9 @@ class VideoEncoderStream extends TransformStream<
             await new Promise((r) => setTimeout(r, 10));
           }
 
-          // Now it's safe to encode
-          // Chunk will be enqueued automatically by encoder.output callback
-          encoder.encode(frame, { keyFrame: true }); // TODO: Handle keyframes properly
-          frame.close();
+          // Encode with keyframe every 60 frames
+          encoder.encode(item.frame, { keyFrame: item.index % 60 === 0 });
+          item.frame.close();
         },
 
         async flush(controller) {
