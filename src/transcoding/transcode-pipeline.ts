@@ -349,6 +349,7 @@ export interface TranscodeProgress {
   };
 }
 
+
 export interface TranscodePipelineOptions {
   onProgress?: (progress: TranscodeProgress) => void;
 }
@@ -376,49 +377,15 @@ export async function transcodePipeline(
   const videoTrack = mediaInfo.streams.filter((s)=>s.codec_type_string === 'video')[0];
   const audioTrack = mediaInfo.streams.filter((s)=>s.codec_type_string === 'audio')[0];
 
-  async function getChunks(type, start=0, end=undefined){
+  const videoDecoderConfig = await demuxer.getDecoderConfig('video');
+  const audioConfig = await demuxer.getDecoderConfig('audio');
 
-    const reader = demuxer.read(type, start, end).getReader()
 
-    const chunks = [];
-
-     return new Promise(function(resolve){
-
-      reader.read().then(async function processPacket({ done, value }) {
-
-        if (value && value.timestamp < 0)  return reader.read().then(processPacket)
-        if(value) chunks.push(value);
-        if(done) return resolve(chunks);
-        return reader.read().then(processPacket)
-      });
-
-    });
-
-   }
-
-  
   const duration = videoTrack.duration;
   const width = videoTrack.width;
   const height = videoTrack.height;
 
 
-
-  console.log(`Video: ${duration}s, will stream in 30s segments`);
-
-  // Step 2: Extract audio chunks (pass-through)
-  let audioChunks: EncodedAudioChunk[] | null = null;
-  let audioConfig = null;
-  try {
-    audioChunks = <EncodedAudioChunk[]> await getChunks('audio')
-    audioConfig = {
-      codec: audioTrack.codec_string,
-      sampleRate: audioTrack.sample_rate,
-      numberOfChannels: audioTrack.channels
-    }
-    console.log(`Found ${audioChunks.length} audio chunks`);
-  } catch (e) {
-    console.log('No audio track found, skipping...');
-  }
 
 
   const storage = new InMemoryStorage();
@@ -460,16 +427,12 @@ export async function transcodePipeline(
     width: width,
     height: height,
     bitrate: Math.round(bitrate),
-    framerate: 24,
+    framerate: 30,
   };
 
   // Step 5: Create the pipeline with true streaming!
   // WebDemuxerStream → Decoder → Render → Encoder → Muxer
 
-  const videoDecoderConfig = {
-    description: videoTrack.extradata,
-    codec: videoTrack.codec_string
-  };
 
 
   // Get the native ReadableStream from web-demuxer
