@@ -1,4 +1,8 @@
 import { MP4Demuxer, getBitrate } from 'webcodecs-utils';
+import { WebDemuxer } from "web-demuxer";
+
+
+
 import { Muxer, ArrayBufferTarget } from 'mp4-muxer';
 
 /**
@@ -207,66 +211,6 @@ class VideoEncoderStream extends TransformStream<
   }
 }
 
-/**
- * ReadableStream that demuxes MP4 file in segments
- * Loads video chunks on-demand in time-based segments rather than all at once
- */
-class MP4DemuxerStream extends ReadableStream<EncodedVideoChunk> {
-  constructor(file: File, segmentDuration = 30) {
-    let demuxer: MP4Demuxer;
-    let currentTime = 0;
-    let duration = 0;
-
-    super({
-      async start(controller) {
-
-        console.log("Running start")
-        demuxer = new MP4Demuxer(file);
-        await demuxer.load();
-        const tracks = demuxer.getTracks();
-        duration = tracks.duration;
-        console.log(`MP4DemuxerStream: Duration ${duration}s, will stream in ${segmentDuration}s segments`);
-      },
-
-      async pull(controller) {
-        // pull() is called automatically when downstream is ready for more data
-        if (currentTime >= duration) {
-          console.log('MP4DemuxerStream: All segments loaded, closing stream');
-          controller.close();
-          return;
-        }
-
-        // Extract next segment (e.g., 30 seconds worth of chunks)
-        const endTime = Math.min(currentTime + segmentDuration, duration);
-        console.log(`MP4DemuxerStream: Loading segment ${currentTime.toFixed(1)}s - ${endTime.toFixed(1)}s`);
-
-
-        console.log("Current Time", currentTime)
-        console.log("End time", endTime)
-
-        const chunksg = await demuxer.extractSegment('video', currentTime, endTime);
-
-        const chunks = chunksg.filter((c)=>c.timestamp/1e6 >= currentTime && c.timestamp/1e6 <= endTime);
-
-      //  const chunks = chunksg;
-
-
-
-        console.log("Chuanks", chunks.length)
-
-
-        // Enqueue all chunks from this segment
-        for (const chunk of chunks) {
-          controller.enqueue(chunk);
-        }
-
-        currentTime = endTime;
-      }
-    }, {
-      highWaterMark: 20  // Buffer up to 20 chunks before applying backpressure
-    });
-  }
-}
 
 /**
  * Transcode using Web Streams pipeline with segment-based streaming
@@ -275,20 +219,61 @@ export async function transcodePipeline(file: File): Promise<Blob> {
   console.log('Starting transcode with Streams Pipeline pattern (segment-based streaming)');
 
   // Step 1: Set up demuxer to get metadata
-  const demuxer = new MP4Demuxer(file);
-  await demuxer.load();
+ // const demuxer = new MP4Demuxer(file);
 
-  const trackData = demuxer.getTracks();
-  const videoDecoderConfig = demuxer.getVideoDecoderConfig();
+  const demuxer = new WebDemuxer({
+    wasmFilePath: "https://cdn.jsdelivr.net/npm/web-demuxer@latest/dist/wasm-files/web-demuxer.wasm",
+  });
 
-  console.log(`Video: ${trackData.duration}s, will stream in 30s segments`);
+
+  await demuxer.load(<File> file);
+
+  const mediaInfo = await demuxer.getMediaInfo();
+  const videoTrack = mediaInfo.streams.filter((s)=>s.codec_type_string === 'video')[0];
+  const audioTrack = mediaInfo.streams.filter((s)=>s.codec_type_string === 'audio')[0];
+
+  async function getChunks(type, start=0, end=undefined){
+
+    const reader = demuxer.read(type, start, end).getReader()
+
+    const chunks = [];
+
+     return new Promise(function(resolve){
+
+      reader.read().then(async function processPacket({ done, value }) {
+        if(value) chunks.push(value);
+        if(done) return resolve(chunks);
+        return reader.read().then(processPacket)
+      });
+
+    });
+
+   }
+
+
+
+  console.log(audioTrack);
+
+  console.log(videoTrack);
+  
+  const duration = videoTrack.duration;
+  const width = videoTrack.width;
+  const height = videoTrack.height;
+
+
+
+  console.log(`Video: ${duration}s, will stream in 30s segments`);
 
   // Step 2: Extract audio chunks (pass-through)
   let audioChunks: EncodedAudioChunk[] | null = null;
   let audioConfig = null;
   try {
-    audioChunks = await demuxer.extractSegment('audio', 0, trackData.duration);
-    audioConfig = demuxer.getAudioDecoderConfig();
+    audioChunks = <EncodedAudioChunk[]> await getChunks('audio')
+    audioConfig = {
+      codec: audioTrack.codec_string,
+      sampleRate: audioTrack.sample_rate,
+      numberOfChannels: audioTrack.channels
+    }
     console.log(`Found ${audioChunks.length} audio chunks`);
   } catch (e) {
     console.log('No audio track found, skipping...');
@@ -300,8 +285,8 @@ export async function transcodePipeline(file: File): Promise<Blob> {
     target,
     video: {
       codec: 'avc',
-      width: trackData.video.codedWidth,
-      height: trackData.video.codedHeight,
+      width,
+      height,
     },
     firstTimestampBehavior: 'offset',
     fastStart: 'in-memory',
@@ -318,22 +303,39 @@ export async function transcodePipeline(file: File): Promise<Blob> {
   const muxer = new Muxer(muxerOptions);
 
   // Step 4: Configure encoder
-  const bitrate = getBitrate(trackData.video.codedWidth, trackData.video.codedHeight, 30, 'good');
+  const bitrate = getBitrate(width, height, 30, 'good');
 
   const videoEncoderConfig: VideoEncoderConfig = {
     codec: 'avc1.42001f',
-    width: trackData.video.codedWidth,
-    height: trackData.video.codedHeight,
+    width: width,
+    height: height,
     bitrate: Math.round(bitrate),
-    framerate: trackData.video.frameRate || 30,
+    framerate: 24,
   };
 
   // Step 5: Create the pipeline with segment-based streaming!
   // MP4DemuxerStream → Decoder → Render → Encoder → Muxer
 
   // Create streaming demuxer (loads 30s segments on-demand)
-  const chunkStream = new MP4DemuxerStream(file, 30);
+ 
 
+  const chunks: EncodedVideoChunk[] = [];
+  
+  const demuxReader = demuxer.read('video', 0).getReader();
+
+
+  const videoDecoderConfig = {
+    description: videoTrack.extradata,
+    codec: videoTrack.codec_string
+  }
+
+  console.log(videoTrack);
+/*
+  decoder.configure({
+    codec: videoTrack.codec_string
+  })
+
+*/
   // Build the pipeline with automatic backpressure
   const encodedStream = chunkStream
     .pipeThrough(new VideoDecoderStream(videoDecoderConfig))
