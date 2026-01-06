@@ -1,6 +1,6 @@
 {
   "name": "webcodecs-examples",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Production-ready WebCodecs implementation examples",
   "type": "module",
   "main": "./dist/index.js",
