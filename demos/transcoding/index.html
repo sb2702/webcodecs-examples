@@ -22,7 +22,21 @@
   <div id="app">
     <h1>WebCodecs Transcoder</h1>
 
-    <p>Loading demo file and transcoding... Check console for output.</p>
+    <div style="margin: 20px 0;">
+      <button id="loadDemoBtn" style="padding: 10px 20px; margin-right: 10px; cursor: pointer;">
+        Load Demo File
+      </button>
+      <button id="uploadBtn" style="padding: 10px 20px; cursor: pointer;">
+        Upload Your File
+      </button>
+      <input type="file" id="fileInput" accept="video/*" style="display: none;">
+    </div>
+
+    <div id="status" style="margin: 20px 0; font-family: monospace;">
+      Ready. Select a file to transcode.
+    </div>
+
+    <p style="color: #666;">Check console for detailed output.</p>
   </div>
 
   <script type="module" src="/demos/transcoding/demo.ts"></script>

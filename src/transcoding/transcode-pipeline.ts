@@ -19,10 +19,14 @@ import { Muxer, ArrayBufferTarget } from 'mp4-muxer';
  * TransformStream that decodes video chunks into frames
  * Handles decoder warm-up and maintains buffer
  */
+
+let decoder: VideoDecoder;
+let encoder: VideoEncoder;
+
 class VideoDecoderStream extends TransformStream<EncodedVideoChunk, VideoFrame> {
   constructor(config: VideoDecoderConfig) {
     // Declare variables in closure scope
-    let decoder: VideoDecoder;
+
     let warmupChunks: EncodedVideoChunk[] = [];
     let warmupComplete = false;
     const WARMUP_SIZE = 20;
@@ -33,14 +37,13 @@ class VideoDecoderStream extends TransformStream<EncodedVideoChunk, VideoFrame> 
 
           setInterval(function(){
 
-            console.log(controller.desiredSize)
+            console.log(`Decoder controller size ${controller.desiredSize}`)
+    
           }, 200);
 
           decoder = new VideoDecoder({
             output: (frame) => {
               // Directly enqueue to TransformStream buffer!
-
-              console.log(frame)
               controller.enqueue(frame);
             },
             error: (e) => {
@@ -105,11 +108,17 @@ class VideoRenderStream extends TransformStream<VideoFrame, VideoFrame> {
   constructor() {
     super(
       {
+
+        start(controller){
+          setInterval(function(){
+
+            console.log(`render controller size ${controller.desiredSize}`)
+          }, 200)
+        },
+
         async transform(frame, controller) {
           // Placeholder: currently just passes through
           // TODO: Add WebGPU processing, filters, etc.
-
-          console.log(`Video transform`, frame)
           const processed = frame;
           controller.enqueue(processed);
         },
@@ -135,15 +144,24 @@ class VideoEncoderStream extends TransformStream<
 > {
   constructor(config: VideoEncoderConfig) {
     // Declare variables in closure scope
-    let encoder: VideoEncoder;
+  
 
     super(
       {
         start(controller) {
+
+
+          setInterval(function(){
+
+            console.log(`Encoder controller size ${controller.desiredSize}`)
+          }, 200)
+
+
           encoder = new VideoEncoder({
             output: (chunk, meta) => {
               // Directly enqueue to TransformStream buffer!
               controller.enqueue({ chunk, meta });
+
             },
             error: (e) => {
               console.error('Encoder error:', e);
@@ -156,7 +174,6 @@ class VideoEncoderStream extends TransformStream<
 
         async transform(frame, controller) {
 
-          console.log(`Encoding frame ${frame}`)
           // Backpressure checks BEFORE encoding:
           // 1. Check encoder's internal queue
           while (encoder.encodeQueueSize >= 20) {
@@ -283,10 +300,23 @@ export async function transcodePipeline(file: File): Promise<Blob> {
       muxer.addVideoChunk(value.chunk, value.meta);
       frameCount++;
 
-      console.log(`Frame count ${frameCount}`)
+      if(frameCount%30 == 0){
+    //    console.log(`Frame count ${frameCount}`)
+
+
+      }
+
+
 
       // Progress logging
       if (frameCount % 30 === 0) {
+
+        if(encoder && decoder){
+          console.log(`Encoder queue size ${encoder.encodeQueueSize}`);
+          console.log(`Decoder decode size ${decoder.decodeQueueSize}`)
+
+        }
+   
         const progress = ((frameCount / videoChunks.length) * 100).toFixed(1);
         const elapsed = performance.now() - startTime;
         const rate = frameCount / (elapsed / 1000);
