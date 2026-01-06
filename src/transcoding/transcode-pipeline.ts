@@ -37,6 +37,7 @@ class DemuxerTrackingStream extends TransformStream<EncodedVideoChunk, { chunk: 
       {
         start(controller) {
           // Save controller reference for progress reporting
+          //@ts-expect-error
           demuxerController = controller;
         },
 
@@ -72,6 +73,7 @@ class VideoDecoderStream extends TransformStream<{ chunk: EncodedVideoChunk; ind
       {
         start(controller) {
           // Save controller reference for progress reporting
+          //@ts-expect-error
           decoderController = controller;
 
           decoder = new VideoDecoder({
@@ -135,6 +137,7 @@ class VideoRenderStream extends TransformStream<{ frame: VideoFrame; index: numb
       {
         start(controller){
           // Save controller reference for progress reporting
+          //@ts-expect-error
           renderController = controller;
         },
 
