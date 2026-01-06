@@ -36,7 +36,48 @@
       Ready. Select a file to transcode.
     </div>
 
+    <div id="pipeline-stats" style="display: none; margin: 20px 0; padding: 15px; background: #f5f5f5; border-radius: 4px; font-family: monospace; font-size: 14px;">
+      <h3 style="margin: 0 0 10px 0;">Pipeline Statistics</h3>
+
+      <div style="margin-bottom: 10px;">
+        <strong>Performance:</strong>
+        <div style="margin-left: 20px;">
+          Frames: <span id="stat-frames">0</span> |
+          FPS: <span id="stat-fps">0</span> |
+          Elapsed: <span id="stat-elapsed">0s</span>
+        </div>
+      </div>
+
+      <div style="margin-bottom: 10px;">
+        <strong>Decoder:</strong>
+        <div style="margin-left: 20px;">
+          Queue Size: <span id="stat-decoder-queue">0</span> / 20 |
+          Buffer Size: <span id="stat-decoder-buffer">0</span> / 10
+        </div>
+      </div>
+
+      <div style="margin-bottom: 10px;">
+        <strong>Render:</strong>
+        <div style="margin-left: 20px;">
+          Buffer Size: <span id="stat-render-buffer">0</span> / 5
+        </div>
+      </div>
+
+      <div>
+        <strong>Encoder:</strong>
+        <div style="margin-left: 20px;">
+          Queue Size: <span id="stat-encoder-queue">0</span> / 20 |
+          Buffer Size: <span id="stat-encoder-buffer">0</span> / 10
+        </div>
+      </div>
+    </div>
+
     <p style="color: #666;">Check console for detailed output.</p>
+
+    <div id="preview-container" style="display: none; margin: 20px 0;">
+      <h3 style="margin: 0 0 10px 0;">Transcoded Video Preview</h3>
+      <video id="preview-video" controls style="max-width: 100%; border-radius: 4px; background: #000;"></video>
+    </div>
   </div>
 
   <script type="module" src="/demos/transcoding/demo.ts"></script>

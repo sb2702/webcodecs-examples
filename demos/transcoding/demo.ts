@@ -4,15 +4,48 @@ console.log('Transcoding demo loaded');
 
 async function processFile(file: File) {
   const statusEl = document.getElementById('status');
+  const pipelineStatsEl = document.getElementById('pipeline-stats');
+
   if (statusEl) {
     statusEl.textContent = `Processing ${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB)...`;
+  }
+
+  // Show pipeline stats
+  if (pipelineStatsEl) {
+    pipelineStatsEl.style.display = 'block';
   }
 
   try {
     console.log('Starting transcode for:', file.name, file.size, 'bytes');
 
-    // Transcode the file
-    const result = await transcodeFile(file, 'pipeline');
+    // Transcode the file with progress reporting
+    const result = await transcodeFile(file, {
+      method: 'pipeline',
+      pipelineOptions: {
+        onProgress: (progress) => {
+  
+          // Update status
+          if (statusEl) {
+            statusEl.textContent = `Processing... ${progress.frameCount} frames (${progress.fps.toFixed(1)} fps)`;
+          }
+
+          // Update pipeline stats display
+          const updateStat = (id: string, value: string | number) => {
+            const el = document.getElementById(id);
+            if (el) el.textContent = value.toString();
+          };
+
+          updateStat('stat-frames', progress.frameCount);
+          updateStat('stat-fps', progress.fps.toFixed(1));
+          updateStat('stat-elapsed', progress.elapsedSeconds.toFixed(1) + 's');
+          updateStat('stat-decoder-queue', progress.decoder.decodeQueueSize);
+          updateStat('stat-decoder-buffer', progress.decoder.bufferSize);
+          updateStat('stat-render-buffer', progress.render.bufferSize);
+          updateStat('stat-encoder-queue', progress.encoder.encodeQueueSize);
+          updateStat('stat-encoder-buffer', progress.encoder.bufferSize);
+        },
+      },
+    });
 
     console.log('Transcoding complete:', result);
 
@@ -20,8 +53,20 @@ async function processFile(file: File) {
       statusEl.textContent = `✓ Transcoding complete! Output size: ${(result.size / 1024 / 1024).toFixed(2)} MB`;
     }
 
-    // Create download link
+    // Create URL for the transcoded video
     const url = URL.createObjectURL(result);
+
+    // Show video preview
+    const previewContainer = document.getElementById('preview-container');
+    const previewVideo = document.getElementById('preview-video') as HTMLVideoElement;
+
+    if (previewContainer && previewVideo) {
+      previewContainer.style.display = 'block';
+      previewVideo.src = url;
+      previewVideo.load();
+    }
+
+    // Create download link
     const a = document.createElement('a');
     a.href = url;
     a.download = file.name.replace(/\.[^/.]+$/, '') + '-transcoded.mp4';

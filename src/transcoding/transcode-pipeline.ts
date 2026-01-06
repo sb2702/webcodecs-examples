@@ -24,8 +24,12 @@ import { Muxer, ArrayBufferTarget } from 'mp4-muxer';
  * Handles decoder warm-up and maintains buffer
  */
 
+// Global references to access queue sizes and buffer state
 let decoder: VideoDecoder;
 let encoder: VideoEncoder;
+let decoderController: TransformStreamDefaultController<VideoFrame>;
+let renderController: TransformStreamDefaultController<VideoFrame>;
+let encoderController: TransformStreamDefaultController<{ chunk: EncodedVideoChunk; meta: EncodedVideoChunkMetadata }>;
 
 class VideoDecoderStream extends TransformStream<EncodedVideoChunk, VideoFrame> {
   constructor(config: VideoDecoderConfig) {
@@ -38,12 +42,8 @@ class VideoDecoderStream extends TransformStream<EncodedVideoChunk, VideoFrame> 
     super(
       {
         start(controller) {
-
-          setInterval(function(){
-
-            console.log(`Decoder controller size ${controller.desiredSize}`)
-    
-          }, 200);
+          // Save controller reference for progress reporting
+          decoderController = controller;
 
           decoder = new VideoDecoder({
             output: (frame) => {
@@ -112,12 +112,9 @@ class VideoRenderStream extends TransformStream<VideoFrame, VideoFrame> {
   constructor() {
     super(
       {
-
         start(controller){
-          setInterval(function(){
-
-            console.log(`render controller size ${controller.desiredSize}`)
-          }, 200)
+          // Save controller reference for progress reporting
+          renderController = controller;
         },
 
         async transform(frame, controller) {
@@ -153,13 +150,8 @@ class VideoEncoderStream extends TransformStream<
     super(
       {
         start(controller) {
-
-
-          setInterval(function(){
-
-            console.log(`Encoder controller size ${controller.desiredSize}`)
-          }, 200)
-
+          // Save controller reference for progress reporting
+          encoderController = controller;
 
           encoder = new VideoEncoder({
             output: (chunk, meta) => {
@@ -229,9 +221,36 @@ function createWebDemuxerStream(
 }
 
 /**
+ * Progress callback information
+ */
+export interface TranscodeProgress {
+  frameCount: number;
+  elapsedSeconds: number;
+  fps: number;
+  decoder: {
+    decodeQueueSize: number;
+    bufferSize: number;  // TransformStream output buffer
+  };
+  render: {
+    bufferSize: number;
+  };
+  encoder: {
+    encodeQueueSize: number;
+    bufferSize: number;
+  };
+}
+
+export interface TranscodePipelineOptions {
+  onProgress?: (progress: TranscodeProgress) => void;
+}
+
+/**
  * Transcode using Web Streams pipeline with true streaming from web-demuxer
  */
-export async function transcodePipeline(file: File): Promise<Blob> {
+export async function transcodePipeline(
+  file: File,
+  options?: TranscodePipelineOptions
+): Promise<Blob> {
   console.log('Starting transcode with Streams Pipeline pattern (segment-based streaming)');
 
   // Step 1: Set up demuxer to get metadata
@@ -257,6 +276,8 @@ export async function transcodePipeline(file: File): Promise<Blob> {
      return new Promise(function(resolve){
 
       reader.read().then(async function processPacket({ done, value }) {
+
+        if (value && value.timestamp < 0)  return reader.read().then(processPacket)
         if(value) chunks.push(value);
         if(done) return resolve(chunks);
         return reader.read().then(processPacket)
@@ -360,24 +381,45 @@ export async function transcodePipeline(file: File): Promise<Blob> {
       muxer.addVideoChunk(value.chunk, value.meta);
       frameCount++;
 
-      if(frameCount%30 == 0){
-    //    console.log(`Frame count ${frameCount}`)
-
-
-      }
-
-
-
-      // Progress logging (estimate based on duration since we don't know total chunks upfront)
-      if (frameCount % 30 === 0) {
-        if(encoder && decoder){
-          console.log(`Encoder queue size ${encoder.encodeQueueSize}`);
-          console.log(`Decoder decode size ${decoder.decodeQueueSize}`)
-        }
-
+      // Progress reporting with detailed pipeline state
+      if (frameCount % 30 === 0 && options?.onProgress) {
         const elapsed = performance.now() - startTime;
-        const rate = frameCount / (elapsed / 1000);
-        console.log(`Progress: ${frameCount} frames, ${(elapsed / 1000).toFixed(1)}s elapsed, ${rate.toFixed(1)} fps`);
+        const elapsedSeconds = elapsed / 1000;
+        const fps = frameCount / elapsedSeconds;
+
+        // Calculate buffer sizes from controller.desiredSize
+        // desiredSize = highWaterMark - currentBufferSize
+        // So: currentBufferSize = highWaterMark - desiredSize
+        const decoderBufferSize = decoderController
+          ? (10 - (decoderController.desiredSize ?? 0))
+          : 0;
+
+        const renderBufferSize = renderController
+          ? (5 - (renderController.desiredSize ?? 0))
+          : 0;
+
+        const encoderBufferSize = encoderController
+          ? (10 - (encoderController.desiredSize ?? 0))
+          : 0;
+
+        const progress: TranscodeProgress = {
+          frameCount,
+          elapsedSeconds,
+          fps,
+          decoder: {
+            decodeQueueSize: decoder?.decodeQueueSize ?? 0,
+            bufferSize: Math.max(0, decoderBufferSize),
+          },
+          render: {
+            bufferSize: Math.max(0, renderBufferSize),
+          },
+          encoder: {
+            encodeQueueSize: encoder?.encodeQueueSize ?? 0,
+            bufferSize: Math.max(0, encoderBufferSize),
+          },
+        };
+
+        options.onProgress(progress);
       }
     }
   } finally {

@@ -10,24 +10,40 @@
 
 import { transcodePromise } from './transcode-promise';
 import { transcodeWaterfall } from './transcode-waterfall';
-import { transcodePipeline } from './transcode-pipeline';
+import { transcodePipeline, TranscodePipelineOptions } from './transcode-pipeline';
 
 export type TranscodeMethod = 'promise' | 'waterfall' | 'pipeline';
+
+export interface TranscodeFileOptions {
+  method?: TranscodeMethod;
+  pipelineOptions?: TranscodePipelineOptions;
+}
 
 /**
  * Transcode a video file using the specified method
  */
 export async function transcodeFile(
   file: File,
-  method: TranscodeMethod = 'promise'
+  methodOrOptions?: TranscodeMethod | TranscodeFileOptions
 ): Promise<Blob> {
+  // Handle legacy string argument or new options object
+  let method: TranscodeMethod = 'promise';
+  let pipelineOptions: TranscodePipelineOptions | undefined;
+
+  if (typeof methodOrOptions === 'string') {
+    method = methodOrOptions;
+  } else if (methodOrOptions) {
+    method = methodOrOptions.method ?? 'promise';
+    pipelineOptions = methodOrOptions.pipelineOptions;
+  }
+
   switch (method) {
     case 'promise':
       return transcodePromise(file);
     case 'waterfall':
       return transcodeWaterfall(file);
     case 'pipeline':
-      return transcodePipeline(file);
+      return transcodePipeline(file, pipelineOptions);
     default:
       throw new Error(`Unknown transcode method: ${method}`);
   }
