@@ -249,6 +249,83 @@ function createWebDemuxerStream(
 }
 
 /**
+ * Create a WritableStream that feeds encoded chunks to the muxer
+ * Handles progress reporting and video chunk writing
+ */
+function createMuxerWriter(
+  muxer: Muxer,
+  options?: { onProgress?: (progress: TranscodeProgress) => void }
+): WritableStream<{ chunk: EncodedVideoChunk; meta: EncodedVideoChunkMetadata }> {
+  const startTime = performance.now();
+  let frameCount = 0;
+
+  return new WritableStream({
+    async write(value) {
+      // Add video chunk to muxer
+      muxer.addVideoChunk(value.chunk, value.meta);
+      frameCount++;
+
+      // Progress reporting
+      if (frameCount % 30 === 0 && options?.onProgress) {
+        const elapsed = performance.now() - startTime;
+        const elapsedSeconds = elapsed / 1000;
+        const fps = frameCount / elapsedSeconds;
+
+        // Calculate buffer sizes from controller.desiredSize
+        // desiredSize = highWaterMark - currentBufferSize
+        // So: currentBufferSize = highWaterMark - desiredSize
+        const demuxerBufferSize = demuxerController
+          ? (20 - (demuxerController.desiredSize ?? 0))
+          : 0;
+
+        const decoderBufferSize = decoderController
+          ? (10 - (decoderController.desiredSize ?? 0))
+          : 0;
+
+        const renderBufferSize = renderController
+          ? (5 - (renderController.desiredSize ?? 0))
+          : 0;
+
+        const encoderBufferSize = encoderController
+          ? (10 - (encoderController.desiredSize ?? 0))
+          : 0;
+
+        const progress: TranscodeProgress = {
+          frameCount,
+          elapsedSeconds,
+          fps,
+          demuxer: {
+            bufferSize: Math.max(0, demuxerBufferSize),
+          },
+          decoder: {
+            decodeQueueSize: decoder?.decodeQueueSize ?? 0,
+            bufferSize: Math.max(0, decoderBufferSize),
+          },
+          render: {
+            bufferSize: Math.max(0, renderBufferSize),
+          },
+          encoder: {
+            encodeQueueSize: encoder?.encodeQueueSize ?? 0,
+            bufferSize: Math.max(0, encoderBufferSize),
+          },
+        };
+
+        options.onProgress(progress);
+      }
+    },
+
+    close() {
+      // Don't finalize muxer here - caller needs to add audio chunks first
+      console.log('All video frames written to muxer');
+    },
+
+    abort(reason) {
+      console.error('Muxer writer aborted:', reason);
+    }
+  });
+}
+
+/**
  * Progress callback information
  */
 export interface TranscodeProgress {
@@ -409,72 +486,12 @@ export async function transcodePipeline(
     .pipeThrough(new VideoRenderStream())
     .pipeThrough(new VideoEncoderStream(videoEncoderConfig));
 
-  // Step 6: Consume the pipeline and feed to muxer
-  const reader = encodedStream.getReader();
-  const startTime = performance.now();
-  let frameCount = 0;
+  // Step 6: Pipe to muxer writer
+  const writer = createMuxerWriter(muxer, {
+    onProgress: options?.onProgress
+  });
 
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      muxer.addVideoChunk(value.chunk, value.meta);
-      frameCount++;
-
-      // Progress reporting with detailed pipeline state
-      if (frameCount % 30 === 0 && options?.onProgress) {
-        const elapsed = performance.now() - startTime;
-        const elapsedSeconds = elapsed / 1000;
-        const fps = frameCount / elapsedSeconds;
-
-        // Calculate buffer sizes from controller.desiredSize
-        // desiredSize = highWaterMark - currentBufferSize
-        // So: currentBufferSize = highWaterMark - desiredSize
-        const demuxerBufferSize = demuxerController
-          ? (20 - (demuxerController.desiredSize ?? 0))
-          : 0;
-
-        const decoderBufferSize = decoderController
-          ? (10 - (decoderController.desiredSize ?? 0))
-          : 0;
-
-        const renderBufferSize = renderController
-          ? (5 - (renderController.desiredSize ?? 0))
-          : 0;
-
-        const encoderBufferSize = encoderController
-          ? (10 - (encoderController.desiredSize ?? 0))
-          : 0;
-
-        const progress: TranscodeProgress = {
-          frameCount,
-          elapsedSeconds,
-          fps,
-          demuxer: {
-            bufferSize: Math.max(0, demuxerBufferSize),
-          },
-          decoder: {
-            decodeQueueSize: decoder?.decodeQueueSize ?? 0,
-            bufferSize: Math.max(0, decoderBufferSize),
-          },
-          render: {
-            bufferSize: Math.max(0, renderBufferSize),
-          },
-          encoder: {
-            encodeQueueSize: encoder?.encodeQueueSize ?? 0,
-            bufferSize: Math.max(0, encoderBufferSize),
-          },
-        };
-
-        options.onProgress(progress);
-      }
-    }
-  } finally {
-    reader.releaseLock();
-  }
-
-  console.log('All frames encoded');
+  await encodedStream.pipeTo(writer);
 
   // Step 7: Add audio chunks (pass-through)
   if (audioChunks && audioConfig) {
