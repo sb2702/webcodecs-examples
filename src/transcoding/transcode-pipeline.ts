@@ -1,9 +1,9 @@
-import { MP4Demuxer, getBitrate } from 'webcodecs-utils';
+import { getBitrate, InMemoryStorage } from 'webcodecs-utils';
 import { WebDemuxer } from "web-demuxer";
 
 
 
-import { Muxer, ArrayBufferTarget } from 'mp4-muxer';
+import { Muxer, StreamTarget } from 'mp4-muxer';
 
 /**
  * Transcoding implementation - Streams Pipeline pattern
@@ -345,8 +345,17 @@ export async function transcodePipeline(
     console.log('No audio track found, skipping...');
   }
 
+
+  const storage = new InMemoryStorage();
+
   // Step 3: Set up muxer
-  const target = new ArrayBufferTarget();
+  const target = new StreamTarget({
+    onData: (data: Uint8Array, position: number) => {
+      storage.write(data, position);
+    },
+    chunked: true,
+    chunkSize: 1024*1024*10
+});
   const muxerOptions: any = {
     target,
     video: {
@@ -478,8 +487,7 @@ export async function transcodePipeline(
   // Step 8: Finalize
   muxer.finalize();
 
-  const arrayBuffer = target.buffer;
-  const blob = new Blob([arrayBuffer], { type: 'video/mp4' });
+  const blob = storage.toBlob();
 
   console.log(`Transcoding complete! Output size: ${blob.size} bytes`);
 
