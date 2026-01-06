@@ -412,9 +412,6 @@ export async function transcodePipeline(
   let audioConfig = null;
   try {
     audioChunks = <EncodedAudioChunk[]> await getChunks('audio')
-
-    console.log("Audio chunks");
-    console.log(audioChunks)
     audioConfig = {
       codec: audioTrack.codec_string,
       sampleRate: audioTrack.sample_rate,
@@ -476,7 +473,6 @@ export async function transcodePipeline(
     codec: videoTrack.codec_string
   };
 
-  console.log('Video decoder config:', videoDecoderConfig);
 
   // Get the native ReadableStream from web-demuxer
   // This handles keyframes, GOP boundaries, and streaming properly
@@ -507,7 +503,7 @@ export async function transcodePipeline(
   // Step 8: Finalize
   muxer.finalize();
 
-  const blob = storage.toBlob();
+  const blob = storage.toBlob('video/mp4');
 
   console.log(`Transcoding complete! Output size: ${blob.size} bytes`);
 
