@@ -211,9 +211,25 @@ class VideoEncoderStream extends TransformStream<
   }
 }
 
+/**
+ * Helper to create a ReadableStream from web-demuxer
+ * web-demuxer.read() returns a native ReadableStream that handles:
+ * - Keyframe alignment
+ * - GOP boundaries
+ * - Proper chunk ordering
+ */
+function createWebDemuxerStream(
+  demuxer: WebDemuxer,
+  trackType: 'video' | 'audio',
+  startTime = 0,
+  endTime?: number
+): ReadableStream<EncodedVideoChunk | EncodedAudioChunk> {
+  // web-demuxer.read() already returns a ReadableStream with proper backpressure!
+  return demuxer.read(trackType, startTime, endTime) as ReadableStream<EncodedVideoChunk | EncodedAudioChunk>;
+}
 
 /**
- * Transcode using Web Streams pipeline with segment-based streaming
+ * Transcode using Web Streams pipeline with true streaming from web-demuxer
  */
 export async function transcodePipeline(file: File): Promise<Blob> {
   console.log('Starting transcode with Streams Pipeline pattern (segment-based streaming)');
@@ -250,11 +266,6 @@ export async function transcodePipeline(file: File): Promise<Blob> {
 
    }
 
-
-
-  console.log(audioTrack);
-
-  console.log(videoTrack);
   
   const duration = videoTrack.duration;
   const width = videoTrack.width;
@@ -269,6 +280,9 @@ export async function transcodePipeline(file: File): Promise<Blob> {
   let audioConfig = null;
   try {
     audioChunks = <EncodedAudioChunk[]> await getChunks('audio')
+
+    console.log("Audio chunks");
+    console.log(audioChunks)
     audioConfig = {
       codec: audioTrack.codec_string,
       sampleRate: audioTrack.sample_rate,
@@ -313,29 +327,20 @@ export async function transcodePipeline(file: File): Promise<Blob> {
     framerate: 24,
   };
 
-  // Step 5: Create the pipeline with segment-based streaming!
-  // MP4DemuxerStream → Decoder → Render → Encoder → Muxer
-
-  // Create streaming demuxer (loads 30s segments on-demand)
- 
-
-  const chunks: EncodedVideoChunk[] = [];
-  
-  const demuxReader = demuxer.read('video', 0).getReader();
-
+  // Step 5: Create the pipeline with true streaming!
+  // WebDemuxerStream → Decoder → Render → Encoder → Muxer
 
   const videoDecoderConfig = {
     description: videoTrack.extradata,
     codec: videoTrack.codec_string
-  }
+  };
 
-  console.log(videoTrack);
-/*
-  decoder.configure({
-    codec: videoTrack.codec_string
-  })
+  console.log('Video decoder config:', videoDecoderConfig);
 
-*/
+  // Get the native ReadableStream from web-demuxer
+  // This handles keyframes, GOP boundaries, and streaming properly
+  const chunkStream = createWebDemuxerStream(demuxer, 'video', 0);
+
   // Build the pipeline with automatic backpressure
   const encodedStream = chunkStream
     .pipeThrough(new VideoDecoderStream(videoDecoderConfig))
