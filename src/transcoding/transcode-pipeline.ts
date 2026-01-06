@@ -256,7 +256,7 @@ function createWebDemuxerStream(
  * Handles progress reporting and video chunk writing
  */
 function createMuxerWriter(
-  muxer: Muxer,
+  muxer: Muxer<StreamTarget>,
   options?: { onProgress?: (progress: TranscodeProgress) => void }
 ): WritableStream<{ chunk: EncodedVideoChunk; meta: EncodedVideoChunkMetadata }> {
   const startTime = performance.now();
