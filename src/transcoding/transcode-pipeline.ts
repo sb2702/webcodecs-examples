@@ -19,18 +19,46 @@ import { Muxer, ArrayBufferTarget } from 'mp4-muxer';
  * - More complex than Promise pattern but theoretically cleaner
  */
 
-/**
- * TransformStream that decodes video chunks into frames
- * Handles decoder warm-up and maintains buffer
- */
-
 // Global references to access queue sizes and buffer state
 let decoder: VideoDecoder;
 let encoder: VideoEncoder;
+let demuxerController: TransformStreamDefaultController<EncodedVideoChunk>;
 let decoderController: TransformStreamDefaultController<VideoFrame>;
 let renderController: TransformStreamDefaultController<VideoFrame>;
 let encoderController: TransformStreamDefaultController<{ chunk: EncodedVideoChunk; meta: EncodedVideoChunkMetadata }>;
 
+/**
+ * TransformStream that tracks demuxed chunks before decoding
+ * Provides visibility into demuxer → decoder buffer and applies backpressure
+ */
+class DemuxerTrackingStream extends TransformStream<EncodedVideoChunk, EncodedVideoChunk> {
+  constructor() {
+    super(
+      {
+        start(controller) {
+          // Save controller reference for progress reporting
+          demuxerController = controller;
+        },
+
+        async transform(chunk, controller) {
+          // Apply backpressure if downstream is full
+          while (controller.desiredSize !== null && controller.desiredSize < 0) {
+            await new Promise((r) => setTimeout(r, 10));
+          }
+
+          // Pass chunk through unchanged
+          controller.enqueue(chunk);
+        },
+      },
+      { highWaterMark: 20 } // Buffer up to 20 chunks from demuxer
+    );
+  }
+}
+
+/**
+ * TransformStream that decodes video chunks into frames
+ * Handles decoder warm-up and maintains buffer
+ */
 class VideoDecoderStream extends TransformStream<EncodedVideoChunk, VideoFrame> {
   constructor(config: VideoDecoderConfig) {
     // Declare variables in closure scope
@@ -227,9 +255,12 @@ export interface TranscodeProgress {
   frameCount: number;
   elapsedSeconds: number;
   fps: number;
+  demuxer: {
+    bufferSize: number;  // Chunks from demuxer → decoder
+  };
   decoder: {
     decodeQueueSize: number;
-    bufferSize: number;  // TransformStream output buffer
+    bufferSize: number;  // TransformStream output buffer (decoded frames)
   };
   render: {
     bufferSize: number;
@@ -364,6 +395,7 @@ export async function transcodePipeline(
 
   // Build the pipeline with automatic backpressure
   const encodedStream = chunkStream
+    .pipeThrough(new DemuxerTrackingStream())       // Track demuxer → decoder buffer
     .pipeThrough(new VideoDecoderStream(videoDecoderConfig))
     .pipeThrough(new VideoRenderStream())
     .pipeThrough(new VideoEncoderStream(videoEncoderConfig));
@@ -390,6 +422,10 @@ export async function transcodePipeline(
         // Calculate buffer sizes from controller.desiredSize
         // desiredSize = highWaterMark - currentBufferSize
         // So: currentBufferSize = highWaterMark - desiredSize
+        const demuxerBufferSize = demuxerController
+          ? (20 - (demuxerController.desiredSize ?? 0))
+          : 0;
+
         const decoderBufferSize = decoderController
           ? (10 - (decoderController.desiredSize ?? 0))
           : 0;
@@ -406,6 +442,9 @@ export async function transcodePipeline(
           frameCount,
           elapsedSeconds,
           fps,
+          demuxer: {
+            bufferSize: Math.max(0, demuxerBufferSize),
+          },
           decoder: {
             decodeQueueSize: decoder?.decodeQueueSize ?? 0,
             bufferSize: Math.max(0, decoderBufferSize),

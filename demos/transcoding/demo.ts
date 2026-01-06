@@ -23,7 +23,7 @@ async function processFile(file: File) {
       method: 'pipeline',
       pipelineOptions: {
         onProgress: (progress) => {
-  
+
           // Update status
           if (statusEl) {
             statusEl.textContent = `Processing... ${progress.frameCount} frames (${progress.fps.toFixed(1)} fps)`;
@@ -38,6 +38,7 @@ async function processFile(file: File) {
           updateStat('stat-frames', progress.frameCount);
           updateStat('stat-fps', progress.fps.toFixed(1));
           updateStat('stat-elapsed', progress.elapsedSeconds.toFixed(1) + 's');
+          updateStat('stat-demuxer-buffer', progress.demuxer.bufferSize);
           updateStat('stat-decoder-queue', progress.decoder.decodeQueueSize);
           updateStat('stat-decoder-buffer', progress.decoder.bufferSize);
           updateStat('stat-render-buffer', progress.render.bufferSize);
