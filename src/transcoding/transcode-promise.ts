@@ -168,11 +168,17 @@ export async function transcodePromise(file: File): Promise<Blob> {
     // Encode the frame
     encoder.encode(processed_frame, { keyFrame: source_chunk.type === 'key' });
 
+    if(i+1 === videoChunks.length){
+      if (encoder.state === 'configured') await encoder.flush();
+    }
+
     // Close frames to free memory
     frame.close();
     if (processed_frame !== frame) {
       processed_frame.close();
     }
+
+
 
     // Add next chunk to decoder buffer (sliding window)
     if (i + decoder_buffer_length < videoChunks.length) {
@@ -185,6 +191,15 @@ export async function transcodePromise(file: File): Promise<Blob> {
       );
 
       decoder.decode(next_chunk);
+
+      if(i+decoder_buffer_length + 1 == videoChunks.length){
+        console.log("Flush decoder")
+        await decoder.flush();
+      }
+
+  
+
+
     }
 
     // Progress logging
@@ -223,8 +238,8 @@ export async function transcodePromise(file: File): Promise<Blob> {
 
   // Cleanup
   try {
-    encoder.close();
-    decoder.close();
+    if(encoder.state !== 'closed') encoder.close();
+    if (decoder.state !== 'closed') decoder.close();
   } catch (e) {
     console.error('Error closing encoder/decoder:', e);
   }
