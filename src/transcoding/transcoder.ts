@@ -9,7 +9,6 @@
  */
 
 import { transcodePromise } from './transcode-promise';
-import { transcodeWaterfall } from './transcode-waterfall';
 import { transcodePipeline, TranscodePipelineOptions } from './transcode-pipeline';
 
 export type TranscodeMethod = 'promise' | 'waterfall' | 'pipeline';
@@ -27,21 +26,19 @@ export async function transcodeFile(
   methodOrOptions?: TranscodeMethod | TranscodeFileOptions
 ): Promise<Blob> {
   // Handle legacy string argument or new options object
-  let method: TranscodeMethod = 'promise';
+  let method: TranscodeMethod = 'pipeline';
   let pipelineOptions: TranscodePipelineOptions | undefined;
 
   if (typeof methodOrOptions === 'string') {
     method = methodOrOptions;
   } else if (methodOrOptions) {
-    method = methodOrOptions.method ?? 'promise';
+    method = methodOrOptions.method ?? 'pipeline';
     pipelineOptions = methodOrOptions.pipelineOptions;
   }
 
   switch (method) {
     case 'promise':
       return transcodePromise(file);
-    case 'waterfall':
-      return transcodeWaterfall(file);
     case 'pipeline':
       return transcodePipeline(file, pipelineOptions);
     default:
