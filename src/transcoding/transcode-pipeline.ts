@@ -68,7 +68,7 @@ class VideoDecoderStream extends TransformStream<{ chunk: EncodedVideoChunk; ind
     // Declare variables in closure scope
     let warmupItems: { chunk: EncodedVideoChunk; index: number }[] = [];
     let warmupComplete = false;
-    const WARMUP_SIZE = 20;
+    const WARMUP_SIZE = 1;
     let pendingIndices: number[] = [];
 
     super(
@@ -93,20 +93,7 @@ class VideoDecoderStream extends TransformStream<{ chunk: EncodedVideoChunk; ind
         },
 
         async transform(item, controller) {
-          // Warm-up phase: collect first N chunks before starting output
-          if (!warmupComplete) {
-            warmupItems.push(item);
-
-            if (warmupItems.length >= WARMUP_SIZE) {
-              // Decode all warmup chunks at once
-              warmupItems.forEach(({ chunk, index }) => {
-                pendingIndices.push(index);
-                decoder.decode(chunk);
-              });
-              warmupComplete = true;
-            }
-            return;
-          }
+  
 
           // Backpressure checks BEFORE decoding:
           // 1. Check decoder's internal queue
@@ -234,22 +221,6 @@ class VideoEncoderStream extends TransformStream<
   }
 }
 
-/**
- * Helper to create a ReadableStream from web-demuxer
- * web-demuxer.read() returns a native ReadableStream that handles:
- * - Keyframe alignment
- * - GOP boundaries
- * - Proper chunk ordering
- */
-function createWebDemuxerStream(
-  demuxer: WebDemuxer,
-  trackType: 'video' | 'audio',
-  startTime = 0,
-  endTime?: number
-): ReadableStream<EncodedVideoChunk | EncodedAudioChunk> {
-  // web-demuxer.read() already returns a ReadableStream with proper backpressure!
-  return demuxer.read(trackType, startTime, endTime) as ReadableStream<EncodedVideoChunk | EncodedAudioChunk>;
-}
 
 /**
  * Create a WritableStream that feeds encoded chunks to the muxer
@@ -476,7 +447,7 @@ export async function transcodePipeline(
 
   // Get the native ReadableStream from web-demuxer
   // This handles keyframes, GOP boundaries, and streaming properly
-  const chunkStream = createWebDemuxerStream(demuxer, 'video', 0);
+  const chunkStream = <ReadableStream> demuxer.read('video', 0);
 
   // Build the pipeline with automatic backpressure
   const encodedStream = chunkStream
