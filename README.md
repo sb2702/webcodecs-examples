@@ -19,15 +19,17 @@ Full-featured video player demonstrating:
 
 ---
 
-### 🔄 [Video Transcoding](./transcoding) *(planned)*
+### 🔄 Video Transcoding *(available)*
 Transcode videos with different codecs, resolutions, and quality settings:
 - Input: MP4/WebM
 - Output: MP4/WebM with custom settings
 - Audio pass-through (no re-encoding)
 - Progress reporting
+- Worker-based for non-blocking UI
 
-**Live Demo**: Coming soon
-**Source**: [/transcoding](./transcoding)
+**Usage**: `import { VideoTranscoder } from 'webcodecs-examples/transcoding'`
+**Demo**: `npm run dev:transcoding`
+**Source**: [/src/transcoding](./src/transcoding)
 
 ---
 

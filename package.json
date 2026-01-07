@@ -19,6 +19,8 @@
     "build": "tsc && vite build",
     "dev:player": "vite --config demos/player/vite.config.ts",
     "build:player": "vite build --config demos/player/vite.config.ts",
+    "dev:moq": "vite --config demos/moq/vite.config.ts",
+    "build:moq": "vite build --config demos/moq/vite.config.ts",
     "dev": "npm run dev:player",
     "type-check": "tsc --noEmit"
   },
@@ -42,6 +44,7 @@
   },
   "homepage": "https://www.webcodecsfundamentals.org",
   "devDependencies": {
+    "@moq/lite": "^0.1.0",
     "@types/node": "^22.10.5",
     "rollup-plugin-web-worker-loader": "^1.7.0",
     "typescript": "^5.8.3",

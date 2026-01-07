@@ -22,7 +22,7 @@ webcodecs-examples/
 │   │   └── renderers/
 │   │       ├── audio/    # Web Audio playback with segment loading
 │   │       └── video/    # VideoDecoder in worker + GPU rendering
-│   ├── transcoding/      # Video transcoding (IN PROGRESS)
+│   ├── transcoding/      # Video transcoding (COMPLETE)
 │   ├── utils/            # Shared utilities
 │   │   ├── WorkerController.ts  # Worker communication helper
 │   │   └── EventEmitter.ts      # Simple event emitter
@@ -117,7 +117,7 @@ Clock.tick() → emits 'tick' event → [AudioPlayer, VideoWorker].onClockTick()
 - **Terminology**: "segments" = time-based blocks (30s), not confused with EncodedAudioChunk
 - **CDN-ready**: Workers inlined using `?worker&inline` for single-file distribution
 
-## Example: Transcoding
+## Example: Transcoding (COMPLETE)
 
 Based on production app (Free.Upscaler.Video), key features:
 
@@ -266,20 +266,20 @@ npm publish     # Publish to npm
    - [x] Single-file CDN build
    - [x] Published to npm
 
-2. **Extract transcoding from production app** → `/src/transcoding`
-   - Simplify to core transcoding logic
-   - Remove app-specific UI
-   - Create minimal UI for demo
-   - Write README
+2. ✅ **Transcoding** - Complete
+   - [x] Extract from production app
+   - [x] Core transcoding logic
+   - [x] Demo UI
+   - [x] README
 
-3. **Create basic structure**:
-   - Root README
-   - Shared deployment config
-   - License (MIT)
+3. **Live Streaming** - In progress → `/src/live-streaming`
+   - Live stream ingestion/playback
+   - WebRTC integration
+   - Low-latency playback
+   - Create demo
 
 4. **Future examples**:
    - `/editing` - Timeline-based editing
-   - `/live-streaming` - Live stream ingestion/playback
 
 ## Usage for Claude
 
