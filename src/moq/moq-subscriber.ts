@@ -26,11 +26,26 @@ export class MoqSubscriber {
       error: (e) => console.error('Video decoder error:', e),
     });
 
-    this.videoDecoder.configure({
+    const config: VideoDecoderConfig = {
       codec: videoRendition.codec,
       codedWidth: videoRendition.codedWidth,
       codedHeight: videoRendition.codedHeight,
-    });
+    };
+
+    console.log("Video rendition");
+    console.log(this.catalog)
+    // Add description if it exists (required for AVC)
+    if (videoRendition.description) {
+      const base64 = videoRendition.description;
+      const binaryString = atob(base64);
+      const bytes = new Uint8Array(binaryString.length);
+      for (let i = 0; i < binaryString.length; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
+      }
+      config.description = bytes;
+    }
+
+    this.videoDecoder.configure(config);
 
     // Start reading video frames
     (async () => {
