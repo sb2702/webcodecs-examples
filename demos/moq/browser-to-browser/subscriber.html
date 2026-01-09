@@ -199,9 +199,7 @@
           frame.close();
 
           frameCount++;
-          if (frameCount % 30 === 0) {
-            log(`Received ${frameCount} video frames`, 'info');
-          }
+   
         });
 
         updateStatus('Receiving stream', 'success');
