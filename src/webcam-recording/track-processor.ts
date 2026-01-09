@@ -1,8 +1,10 @@
 // Firefox doesn't support MediaStreamTrackProcessor so we need to use a polyfill.
 // Based on: https://jan-ivar.github.io/polyfills/mediastreamtrackprocessor.js
 // Thanks Jan-Ivar
+
+
 export function TrackProcessor(track: MediaStreamTrack): ReadableStream<VideoFrame> {
-  // @ts-expect-error No typescript types yet.
+
   if (self.MediaStreamTrackProcessor) {
     // Rewrite timestamps so they use our wall clock time instead of starting at 0.
     // TODO verify all browsers actually start at 0.
@@ -21,8 +23,7 @@ export function TrackProcessor(track: MediaStreamTrack): ReadableStream<VideoFra
     return input.pipeThrough(rewrite);
   }
 
-  // TODO Firefox supports this in a background worker.
-  console.warn("Using MediaStreamTrackProcessor polyfill; performance might suffer.");
+
 
   const settings = track.getSettings();
   if (!settings) {
