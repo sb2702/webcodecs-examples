@@ -1,5 +1,5 @@
 import * as Moq from '@moq/lite';
-import { Effect, Signal } from "@moq/signals";
+
 
 // Endpoint configurations
 const ENDPOINTS = {
@@ -52,33 +52,7 @@ function updateUI(connected: boolean, error: boolean = false) {
 }
 
 
-async function listen(track){
 
-
-  console.log("Connecting to broadcast")
-
-
-  console.log("Listening to track");
-
-  console.log("Track", track)
-
-  setInterval(async function(){
-
-    console.log("Waiting for next group")
-    const group = await track.nextGroup();
-    console.log("Group", group)
-
-    const frame = await group.readString();
-
-    console.log("Frame", frame)
-
-
-
-  }, 100);
-
-
-
-}
 // Connect to endpoint
 async function connect(endpoint: string, name: string) {
   try {
@@ -86,67 +60,35 @@ async function connect(endpoint: string, name: string) {
 
 
     connection = await Moq.Connection.connect(new URL(endpoint));
+    log(` connected`);
 
 
     currentEndpoint = name;
 
-    log(`Successfully connected to ${name}!`, 'success');
-    updateUI(true);
 
-    // Test basic functionality - listen for announcements
-    log('Listening for announcements...', 'info');
-
+    let broadcast = connection.consume('my-broadcast');
+    console.log("Broadcast");
+    console.log(broadcast)
 
 
-    console.log("Connection", connection);
+    console.log("Subcribing to chat")
+      // Subscribe to a specific track
+    const track = await broadcast.subscribe("chat");
 
+    console.log("Subscribed", track)
 
-    const broadcast = new Moq.Broadcast();
+    // const track = 
 
-
-
-    console.log("Doing broadcast request")
-
-    connection.publish('my-broadcast', broadcast);
-
-
-    const trackRequest =  await broadcast.requested();
-
-    console.log("Track requested", trackRequest)
-
-    console.log(trackRequest?.track.state)
-
-    // Create a broadcast, not associated with any connection/name yet.
-
-
-    if(!trackRequest) return;
-
-    const {track, priority} = trackRequest;
-
-   
-    console.log(`Track`, track);
-    console.log(`Priority`, priority)
-   // const track = 
-
-
-    console.log("Track");
-    console.log(track)
+    setInterval(async function(){
 
      
-    if(track.name ==='chat'){
-      setInterval(function(){
+      const group = await track.nextGroup();
 
-        console.log("Sending stuff")
-        const group = track.appendGroup();
-        group.writeString("Hello, MoQ!");
-        group.close();
-  
-      }, 1000);
-  
-  }
+      const frame = await group.readString();
 
+      console.log("Received:", frame);
 
- 
+    }, 200);
 
 
 
