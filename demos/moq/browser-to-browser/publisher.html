@@ -192,24 +192,15 @@ const catalogData =
 
     async function init() {
       try {
-        log(`Connecting to relay: ${relayUrl}`, 'info');
-        updateStatus('Connecting to relay...');
-
         connection = await Moq.Connection.connect(new URL(relayUrl));
-        log('Connected to relay', 'success');
 
         const broadcast = new Moq.Broadcast();
         connection.publish(broadcastName, broadcast);
-        log(`Published broadcast: "${broadcastName}"`, 'success');
-
-        updateStatus('Waiting for track requests...');
 
         // Handle track requests in a loop
         while (true) {
           const trackRequest = await broadcast.requested();
           const requestedTrack = trackRequest.track;
-
-          log(`Track requested: "${requestedTrack.name}"`, 'success');
 
           if (requestedTrack.name === 'catalog.json') {
             // Send catalog data as JSON
@@ -217,29 +208,20 @@ const catalogData =
             const group = requestedTrack.appendGroup();
             group.writeString(catalogJson);
             group.close();
-            log('Sent catalog.json', 'success');
           } else if (requestedTrack.name === trackName) {
             // This is the main data track
             track = requestedTrack;
-            updateStatus(`✓ Ready to send on track "${trackName}"`, 'success');
             sendBtn.disabled = false;
-          } else {
-            log(`Unknown track requested: "${requestedTrack.name}"`, 'info');
           }
         }
 
       } catch (error) {
-        log(`Error: ${error.message}`, 'error');
-        updateStatus('Connection failed', 'error');
         console.error('Init error:', error);
       }
     }
 
     function sendMessage() {
-      if (!track) {
-        log('No track available', 'error');
-        return;
-      }
+      if (!track) return;
 
       try {
         messageCount++;
@@ -247,9 +229,8 @@ const catalogData =
         const group = track.appendGroup();
         group.writeString(message);
         group.close();
-        log(`Sent: "${message}"`, 'success');
       } catch (error) {
-        log(`Send error: ${error.message}`, 'error');
+        console.error('Send error:', error);
       }
     }
 
@@ -257,9 +238,6 @@ const catalogData =
     sendBtn.addEventListener('click', sendMessage);
 
     // Initialize
-    log('Publisher initializing...', 'info');
-    log(`Broadcast: "${broadcastName}"`, 'info');
-    log(`Track: "${trackName}"`, 'info');
     init();
   </script>
 </body>

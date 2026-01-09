@@ -144,8 +144,10 @@
     document.getElementById('broadcastName').value = initialBroadcast;
 
     // Update iframes with initial broadcast name
-    const relay = 'https://interop-relay.cloudflare.mediaoverquic.com:443';
-    const initialTrack = document.getElementById('trackName').value;
+   // const relay = 'https://interop-relay.cloudflare.mediaoverquic.com:443';
+    
+   const relay = "http://localhost:4443"
+   const initialTrack = document.getElementById('trackName').value;
     const initialParams = `relay=${encodeURIComponent(relay)}&broadcast=${encodeURIComponent(initialBroadcast)}&track=${encodeURIComponent(initialTrack)}`;
     document.getElementById('publisherFrame').src = `publisher.html?${initialParams}`;
     document.getElementById('subscriberFrame').src = `subscriber.html?${initialParams}`;

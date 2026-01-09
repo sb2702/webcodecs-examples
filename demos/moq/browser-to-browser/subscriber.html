@@ -161,40 +161,74 @@
       messagesEl.scrollTop = messagesEl.scrollHeight;
     }
 
+
+
+    async function getCatalog(broadcast){
+
+
+           // First, subscribe to catalog.json to get stream metadata
+
+           console.log("try again")
+
+           try{
+            
+
+            const catalogTrack = broadcast.subscribe('catalog.json');
+
+
+            for (;;) {
+
+
+            // Read the first group which contains the catalog JSON
+            const catalogGroup = await catalogTrack.nextGroup();
+
+
+            if(catalogGroup){
+
+
+              const catalogJson = await catalogGroup.readString();
+              const catalog = JSON.parse(catalogJson);
+              console.log('Catalog:', catalog);
+
+              break;
+            }
+
+            }
+
+
+           } catch(e){
+
+
+            console.log("Failed trying again");
+            await new Promise((r)=>setTimeout(500));
+
+            return await getCatalog(broadcast);
+
+           }
+
+
+    
+
+    }
+
+
+
+
     async function init() {
       try {
-        log(`Connecting to relay: ${relayUrl}`, 'info');
-        updateStatus('Connecting to relay...');
-
         connection = await Moq.Connection.connect(new URL(relayUrl));
-        log('Connected to relay', 'success');
 
-        updateStatus('Subscribing to broadcast...');
         const broadcast = connection.consume(broadcastName);
-        log(`Consuming broadcast: "${broadcastName}"`, 'success');
 
-        // First, subscribe to catalog.json to get stream metadata
-        updateStatus('Fetching catalog.json...');
-        const catalogTrack = await broadcast.subscribe('catalog.json');
-        log('Subscribed to catalog.json', 'success');
 
-        // Read the first group which contains the catalog JSON
-        const catalogGroup = await catalogTrack.nextGroup();
-        if (!catalogGroup) {
-          throw new Error('No catalog data received');
-        }
+        await getCatalog(broadcast);
 
-        const catalogJson = await catalogGroup.readString();
-        const catalog = JSON.parse(catalogJson);
-        log('Received catalog data', 'success');
-        console.log('Catalog:', catalog);
+        console.log("Got catalog")
 
-        log(catalogJson, 'success');
-
+   
+/*
         // Now subscribe to the main track
         const track = await broadcast.subscribe(trackName);
-        log(`Subscribed to track: "${trackName}"`, 'success');
-        updateStatus(`✓ Listening to "${trackName}"`, 'success');
 
         // Listen for messages
         (async () => {
@@ -206,25 +240,19 @@
               const message = await group.readString();
               if (!message) break;
 
-              log(`Received message`, 'success');
               displayMessage(message);
             }
           } catch (error) {
-            log(`Read error: ${error.message}`, 'error');
+            console.error('Read error:', error);
           }
         })();
-
+*/
       } catch (error) {
-        log(`Error: ${error.message}`, 'error');
-        updateStatus('Connection failed', 'error');
         console.error('Init error:', error);
       }
     }
 
     // Initialize
-    log('Subscriber initializing...', 'info');
-    log(`Broadcast: "${broadcastName}"`, 'info');
-    log(`Track: "${trackName}"`, 'info');
     init();
   </script>
 </body>
