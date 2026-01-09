@@ -24,6 +24,9 @@ export class WebcamRecorder {
     const videoSettings = this.videoTrack.getSettings();
     const audioSettings = this.audioTrack.getSettings();
 
+    console.log("Audio settings", audioSettings)
+
+    
     // Set up storage and muxer
     const storage = new InMemoryStorage();
     const target = new StreamTarget({
