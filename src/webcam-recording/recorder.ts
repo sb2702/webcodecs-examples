@@ -1,4 +1,4 @@
-import { MediaStreamTrackProcessor, InMemoryStorage } from 'webcodecs-utils';
+import { MediaStreamTrackProcessor, InMemoryStorage, getSampleRate } from 'webcodecs-utils';
 import { Muxer, StreamTarget } from 'mp4-muxer';
 import { VideoEncoderStream } from './video-encoder-stream';
 import { AudioEncoderStream } from './audio-encoder-stream';
@@ -24,7 +24,13 @@ export class WebcamRecorder {
     const videoSettings = this.videoTrack.getSettings();
     const audioSettings = this.audioTrack.getSettings();
 
+
+    if(!audioSettings.channelCount){
+      audioSettings.channelCount = 1;
+    }
     console.log("Audio settings", audioSettings)
+
+    const sampleRate = await getSampleRate(this.audioTrack);
 
     
     // Set up storage and muxer
@@ -37,7 +43,9 @@ export class WebcamRecorder {
       chunkSize: 1024 * 1024 * 10
     });
 
-    const useAAC = await isAACSupported(audioSettings.sampleRate, audioSettings.channelCount);
+    const useAAC = await isAACSupported(sampleRate, audioSettings.channelCount);
+
+    console.log("USe AAC", useAAC)
 
     const muxer = new Muxer({
       target,
@@ -49,7 +57,7 @@ export class WebcamRecorder {
       audio: {
         codec: useAAC ? 'aac' : 'opus',
         numberOfChannels: audioSettings.channelCount!,
-        sampleRate: audioSettings.sampleRate!,
+        sampleRate: sampleRate!,
       },
       firstTimestampBehavior: 'offset',
       fastStart: 'in-memory',
@@ -66,8 +74,8 @@ export class WebcamRecorder {
     // Audio pipeline
     const audioProcessor = new MediaStreamTrackProcessor({ track: this.audioTrack });
     const audioEncoderStream = new AudioEncoderStream(
-      audioSettings.sampleRate!,
-      audioSettings.channelCount!
+      sampleRate!,
+      Math.min(audioSettings.channelCount!,2)
     );
 
     // Create abort controller

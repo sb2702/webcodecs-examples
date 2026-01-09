@@ -7,8 +7,11 @@ export class AudioEncoderStream extends TransformStream<AudioData, EncodedAudioC
     super(
       {
         async start(controller) {
+
+          
           const useAAC = await isAACSupported(sampleRate, numberOfChannels);
 
+          console.log("USe AAC", useAAC)
           const config: AudioEncoderConfig = {
             codec: useAAC ? 'mp4a.40.2' : 'opus',
             sampleRate,
@@ -16,6 +19,8 @@ export class AudioEncoderStream extends TransformStream<AudioData, EncodedAudioC
             bitrate: 128000,
           };
 
+          console.log("Config", config);
+          
           encoder = new AudioEncoder({
             output: (chunk) => {
               controller.enqueue(chunk);
