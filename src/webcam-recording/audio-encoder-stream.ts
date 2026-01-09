@@ -1,17 +1,21 @@
+import { isAACSupported } from './audio-codec-support';
+
 export class AudioEncoderStream extends TransformStream<AudioData, EncodedAudioChunk> {
   constructor(sampleRate: number, numberOfChannels: number) {
     let encoder: AudioEncoder;
 
-    const config: AudioEncoderConfig = {
-      codec: 'mp4a.40.2', // AAC-LC
-      sampleRate,
-      numberOfChannels,
-      bitrate: 128000,
-    };
-
     super(
       {
-        start(controller) {
+        async start(controller) {
+          const useAAC = await isAACSupported(sampleRate, numberOfChannels);
+
+          const config: AudioEncoderConfig = {
+            codec: useAAC ? 'mp4a.40.2' : 'opus',
+            sampleRate,
+            numberOfChannels,
+            bitrate: 128000,
+          };
+
           encoder = new AudioEncoder({
             output: (chunk) => {
               controller.enqueue(chunk);
