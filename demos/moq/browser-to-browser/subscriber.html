@@ -162,12 +162,12 @@
 
 
 
-    async function getCatalog(broadcast) {
+    async function getCatalog(broadcast, catalogTrack) {
       try {
         
-        const catalogTrack = broadcast.subscribe('catalog.json');
 
 
+        catalogTrack = broadcast.subscribe('catalog.json')
         for (;;) {
           console.log("Catalog track", catalogTrack)
           const catalogGroup = await catalogTrack.nextGroup();
@@ -184,8 +184,21 @@
         }
       } catch (e) {
         await new Promise((r) => setTimeout(r, 500));
-        return await getCatalog(broadcast);
+        return await getCatalog(broadcast, catalogTrack);
       }
+    }
+
+    async function getCatalogTrack(broadcast){
+
+          const catalogTrack  = await broadcast.subscribe('catalog.json')
+
+          console.log("Catalog track")
+          console.log(await catalogTrack.state.closed);
+
+          return catalogTrack;
+
+          
+
     }
 
 
@@ -201,8 +214,14 @@
         log(`Consuming broadcast: ${broadcastName}`, 'info');
 
         log(`Listening for catelog`);
+
+        const catalogTrack = await getCatalogTrack(broadcast);
+
+
+
+        console.log("Subscribed", catalogTrack.state)
  
-        const catalog = await getCatalog(broadcast);
+        const catalog = await getCatalog(broadcast, catalogTrack);
 
         updateStatus('Subscribing to tracks...', 'info');
 
@@ -223,7 +242,6 @@
               const group = await videoTrack.nextGroup();
               if (!group) break;
 
-              log('Received video group', 'info');
               // TODO: Process video data
             }
           } catch (error) {
@@ -238,7 +256,7 @@
               const group = await audioTrack.nextGroup();
               if (!group) break;
 
-              log('Received audio group', 'info');
+              
               // TODO: Process audio data
             }
           } catch (error) {
