@@ -228,11 +228,11 @@
         // Subscribe to video track
         const videoTrack = broadcast.subscribe('video');
         log('Subscribed to video track', 'success');
-
+/*
         // Subscribe to audio track
         const audioTrack = broadcast.subscribe('audio');
         log('Subscribed to audio track', 'success');
-
+*/
         updateStatus('Ready to receive data', 'success');
 
         // Listen for video data
@@ -241,6 +241,7 @@
             while (true) {
               const group = await videoTrack.nextGroup();
               if (!group) break;
+              const frame = await group.readFrame();
 
               // TODO: Process video data
             }
@@ -248,13 +249,19 @@
             log('Video read error: ' + error.message, 'error');
           }
         })();
-
+/*
         // Listen for audio data
         (async () => {
           try {
             while (true) {
               const group = await audioTrack.nextGroup();
               if (!group) break;
+
+
+              const frame = await group.readFrame();
+
+//              console.log("frame", frame)
+        
 
               
               // TODO: Process audio data
@@ -263,7 +270,7 @@
             log('Audio read error: ' + error.message, 'error');
           }
         })();
-
+*/
       } catch (error) {
         updateStatus('Connection failed', 'error');
         log('Init error: ' + error.message, 'error');
