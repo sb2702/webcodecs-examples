@@ -1,6 +1,5 @@
 import { getWebcam } from '../../src/webcam-recording/webcam';
-import { TrackProcessor } from '../../src/webcam-recording/track-processor';
-import { GPUFrameRenderer } from 'webcodecs-utils';
+import { GPUFrameRenderer, MediaStreamTrackProcessor } from 'webcodecs-utils';
 
 document.getElementById('startBtn')?.addEventListener('click', async () => {
   const { videoTrack, stream } = await getWebcam();
@@ -9,15 +8,10 @@ document.getElementById('startBtn')?.addEventListener('click', async () => {
 
   const canvas = document.getElementById('canvas') as HTMLCanvasElement;
   const renderer = new GPUFrameRenderer(canvas);
-  
   await renderer.init();
 
-
-  
-
-
-  const frameStream = TrackProcessor(videoTrack);
-  const reader = frameStream.getReader();
+  const processor = new MediaStreamTrackProcessor({ track: videoTrack });
+  const reader = processor.readable.getReader();
 
   while (true) {
     const { done, value: frame } = await reader.read();
