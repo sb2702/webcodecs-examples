@@ -129,7 +129,8 @@
 
     import * as Moq from 'https://esm.sh/@moq/lite';
     import { MoqPublisher } from '../../../src/moq/moq-publisher.ts';
-    import { getSampleRate } from 'webcodecs-utils';
+    import { getSampleRate, getBitrate, getCodecString } from 'webcodecs-utils';
+    
 
     // Get URL parameters
     const params = new URLSearchParams(window.location.search);
@@ -212,13 +213,22 @@
         const audioSettings = audioTrack.getSettings();
         const sampleRate = await getSampleRate(audioTrack);
 
-        const codec = 'vp8';
+        const codec = 'avc';
 
+        console.log("Getting description")
+
+        const description  = await MoqPublisher.getDescription(videoTrack);
+
+        console.log("Description", description);
+
+        
+        
+        const bitrate = getBitrate(videoSettings.width, videoSettings.height, 30, 'good');
         const catalogData = {
           video: {
             renditions: {
               video0: {
-                codec: codec,
+                codec: getCodecString(codec, videoSettings.width, videoSettings.height, bitrate),
                 codedWidth: videoSettings.width,
                 codedHeight: videoSettings.height,
               }

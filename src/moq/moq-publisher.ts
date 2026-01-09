@@ -19,6 +19,55 @@ export class MoqPublisher {
     this.codec = codec;
   }
 
+  static async getDescription(videoTrack: MediaStreamTrack, codec: 'avc' | 'vp8' | 'vp9'): Promise<string> {
+    if (codec === 'vp8' || codec === 'vp9') {
+      return ''; // VP8/VP9 don't need description
+    }
+
+    const videoSettings = videoTrack.getSettings();
+    const processor = new MediaStreamTrackProcessor({ track: videoTrack });
+    const reader = processor.readable.getReader();
+
+    // Read one frame
+    const { value: frame } = await reader.read();
+    reader.releaseLock();
+
+    if (!frame) {
+      return '';
+    }
+
+    // Encode the frame to get metadata
+    return new Promise((resolve) => {
+      const encoder = new VideoEncoder({
+        output: (chunk, meta) => {
+          if (meta?.decoderConfig?.description) {
+            const description = new Uint8Array(meta.decoderConfig.description);
+            const base64 = btoa(String.fromCharCode(...description));
+            resolve(base64);
+          }
+        },
+        error: (e) => {
+          console.error('Test encoder error:', e);
+          resolve('');
+        },
+      });
+
+      const bitrate = 1000000;
+      encoder.configure({
+        codec: 'avc1.42001f',
+        width: videoSettings.width!,
+        height: videoSettings.height!,
+        bitrate,
+      });
+
+      encoder.encode(frame, { keyFrame: true });
+      encoder.flush().then(() => {
+        encoder.close();
+        frame.close();
+      });
+    });
+  }
+
   async start(): Promise<void> {
     if (this.abortController) {
       throw new Error('Already publishing');
