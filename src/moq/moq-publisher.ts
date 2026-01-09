@@ -7,14 +7,16 @@ export class MoqPublisher {
   private videoTrack: MediaStreamTrack;
   private audioTrack: MediaStreamTrack;
   private broadcast: any;
+  private codec: 'avc' | 'vp8' | 'vp9';
   private videoMoqTrack: any = null;
   private audioMoqTrack: any = null;
   private abortController: AbortController | null = null;
 
-  constructor(videoTrack: MediaStreamTrack, audioTrack: MediaStreamTrack, broadcast: any) {
+  constructor(videoTrack: MediaStreamTrack, audioTrack: MediaStreamTrack, broadcast: any, codec: 'avc' | 'vp8' | 'vp9' = 'vp8') {
     this.videoTrack = videoTrack;
     this.audioTrack = audioTrack;
     this.broadcast = broadcast;
+    this.codec = codec;
   }
 
   async start(): Promise<void> {
@@ -37,7 +39,8 @@ export class MoqPublisher {
     const videoEncoderStream = new VideoEncoderStream(
       videoSettings.width!,
       videoSettings.height!,
-      videoSettings.frameRate || 30
+      videoSettings.frameRate || 30,
+      this.codec
     );
 
     // Audio pipeline

@@ -1,13 +1,13 @@
 import { getBitrate, getCodecString } from 'webcodecs-utils';
 
 export class VideoEncoderStream extends TransformStream<VideoFrame, { chunk: EncodedVideoChunk; meta: EncodedVideoChunkMetadata }> {
-  constructor(width: number, height: number, fps: number = 30) {
+  constructor(width: number, height: number, fps: number = 30, codec: 'avc' | 'vp8' | 'vp9' = 'vp8') {
     let encoder: VideoEncoder;
     let frameIndex = 0;
 
     const bitrate = getBitrate(width, height, fps, 'good');
     const config: VideoEncoderConfig = {
-      codec: getCodecString('avc', width, height, bitrate),
+      codec: getCodecString(codec, width, height, bitrate),
       width,
       height,
       bitrate: Math.round(bitrate),

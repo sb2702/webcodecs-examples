@@ -212,11 +212,13 @@
         const audioSettings = audioTrack.getSettings();
         const sampleRate = await getSampleRate(audioTrack);
 
+        const codec = 'vp8';
+
         const catalogData = {
           video: {
             renditions: {
               video0: {
-                codec: 'avc1.64001f',
+                codec: codec,
                 codedWidth: videoSettings.width,
                 codedHeight: videoSettings.height,
               }
@@ -254,7 +256,7 @@
         })();
 
         // Start MoQ publisher
-        publisher = new MoqPublisher(videoTrack, audioTrack, broadcast);
+        publisher = new MoqPublisher(videoTrack, audioTrack, broadcast, codec);
         await publisher.start();
         log('Publisher started', 'success');
 

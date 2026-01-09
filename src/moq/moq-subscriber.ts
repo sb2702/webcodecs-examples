@@ -48,6 +48,8 @@ export class MoqSubscriber {
             data: frame.data,
           });
 
+          group.close();
+
           this.videoDecoder!.decode(chunk);
         }
       } catch (error) {
