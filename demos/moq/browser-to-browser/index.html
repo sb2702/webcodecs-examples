@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MoQ Demo</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      margin: 0;
+      padding: 20px;
+      background-color: #f8f9fa;
+    }
+
+    .container {
+      max-width: 100%;
+    }
+
+    .controls {
+      margin-bottom: 15px;
+      padding: 15px;
+      background: #fff;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    }
+
+    .controls label {
+      display: block;
+      margin-bottom: 5px;
+      font-weight: 600;
+      font-size: 14px;
+      color: #2d3748;
+    }
+
+    .input-group {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-bottom: 10px;
+    }
+
+    .input-wrapper {
+      flex: 1;
+      min-width: 150px;
+    }
+
+    .input-wrapper label {
+      font-size: 12px;
+      color: #4a5568;
+      font-weight: 500;
+      margin-bottom: 3px;
+    }
+
+    input {
+      width: 100%;
+      padding: 8px 10px;
+      border: 1px solid #cbd5e0;
+      border-radius: 4px;
+      font-size: 13px;
+      box-sizing: border-box;
+    }
+
+    button {
+      padding: 8px 20px;
+      background: #3182ce;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-weight: 500;
+      font-size: 13px;
+      transition: background-color 0.2s;
+    }
+
+    button:hover {
+      background: #2b6cb0;
+    }
+
+    .demo-grid {
+      display: block;
+
+    }
+
+    .demo-grid iframe {
+     
+      float:left;
+      min-width: 0;
+      height: 450px;
+      width: 49%;
+      border: 1px solid #cbd5e0;
+      border-radius: 8px;
+      background: white;
+    }
+
+    @media (max-width: 768px) {
+      .demo-grid {
+        flex-direction: column;
+      }
+
+      iframe {
+        height: 400px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="controls">
+      <label>Configuration</label>
+      <div class="input-group">
+        <div class="input-wrapper">
+          <label>Broadcast Name:</label>
+          <input type="text" id="broadcastName" value="my-broadcast" />
+        </div>
+        <div class="input-wrapper">
+          <label>Track Name:</label>
+          <input type="text" id="trackName" value="chat" />
+        </div>
+        <div style="align-self: flex-end;">
+          <button id="updateBtn">Reload with New Config</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="demo-grid">
+      <iframe id="publisherFrame" src="about:blank"></iframe>
+      <iframe id="subscriberFrame" src="about:blank"></iframe>
+    </div>
+  </div>
+
+  <script>
+    // Generate random broadcast name on load
+    function generateBroadcastName() {
+      const adjectives = ['happy', 'clever', 'swift', 'bright', 'calm', 'bold', 'wise', 'kind'];
+      const nouns = ['panda', 'tiger', 'eagle', 'dolphin', 'fox', 'wolf', 'hawk', 'bear'];
+      const adj = adjectives[Math.floor(Math.random() * adjectives.length)];
+      const noun = nouns[Math.floor(Math.random() * nouns.length)];
+      const num = Math.floor(Math.random() * 1000);
+      return `${adj}-${noun}-${num}`;
+    }
+
+    // Set initial random broadcast name
+    const initialBroadcast = generateBroadcastName();
+    document.getElementById('broadcastName').value = initialBroadcast;
+
+    // Update iframes with initial broadcast name
+    const relay = 'https://interop-relay.cloudflare.mediaoverquic.com:443';
+    const initialTrack = document.getElementById('trackName').value;
+    const initialParams = `relay=${encodeURIComponent(relay)}&broadcast=${encodeURIComponent(initialBroadcast)}&track=${encodeURIComponent(initialTrack)}`;
+    document.getElementById('publisherFrame').src = `publisher.html?${initialParams}`;
+    document.getElementById('subscriberFrame').src = `subscriber.html?${initialParams}`;
+
+    document.getElementById('updateBtn').addEventListener('click', () => {
+      const broadcast = document.getElementById('broadcastName').value;
+      const track = document.getElementById('trackName').value;
+
+      const baseParams = `relay=${encodeURIComponent(relay)}&broadcast=${encodeURIComponent(broadcast)}&track=${encodeURIComponent(track)}`;
+
+      document.getElementById('publisherFrame').src = `publisher.html?${baseParams}`;
+
+      setTimeout(function(){
+        document.getElementById('subscriberFrame').src = `subscriber.html?${baseParams}`;
+     
+      
+      }, 100)
+      
+
+    });
+  </script>
+</body>
+</html>
