@@ -103,15 +103,14 @@
     <h3>📥 Subscriber</h3>
     <div id="status" class="status">Initializing...</div>
 
-    <div class="messages" id="messages">
-      <div style="color: #a0aec0; font-size: 12px; text-align: center;">Waiting for messages...</div>
-    </div>
+    <canvas id="canvas" width="640" height="360" style="width: 100%; max-width: 355px; border-radius: 4px; margin: 10px 0; background: #000;"></canvas>
 
     <div class="log" id="log"></div>
   </div>
 
   <script type="module">
     import * as Moq from 'https://esm.sh/@moq/lite';
+    import { MoqSubscriber } from '../../../src/moq/moq-subscriber.ts';
 
     // Get URL parameters
     const params = new URLSearchParams(window.location.search);
@@ -121,11 +120,13 @@
     // UI Elements
     const statusEl = document.getElementById('status');
     const logEl = document.getElementById('log');
-    const messagesEl = document.getElementById('messages');
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
 
     // State
     let connection = null;
-    let messageCount = 0;
+    let subscriber = null;
+    let frameCount = 0;
 
     // Logging
     function log(message, type = 'info') {
@@ -145,34 +146,15 @@
       if (type === 'error') statusEl.className = 'status error';
     }
 
-    function displayMessage(text) {
-      // Clear placeholder if this is first message
-      if (messageCount === 0) {
-        messagesEl.innerHTML = '';
-      }
-
-      messageCount++;
-      const messageDiv = document.createElement('div');
-      messageDiv.className = 'message';
-      const timestamp = new Date().toLocaleTimeString();
-      messageDiv.innerHTML = `<span class="time">${timestamp}</span>${text}`;
-      messagesEl.appendChild(messageDiv);
-      messagesEl.scrollTop = messagesEl.scrollHeight;
-    }
 
 
 
-    async function getCatalog(broadcast, catalogTrack) {
+    async function getCatalog(broadcast) {
       try {
-        
+        const catalogTrack = broadcast.subscribe('catalog.json');
 
-
-        catalogTrack = broadcast.subscribe('catalog.json')
         for (;;) {
-          console.log("Catalog track", catalogTrack)
           const catalogGroup = await catalogTrack.nextGroup();
-
-          console.log("Group", catalogGroup)
 
           if (catalogGroup) {
             const catalogJson = await catalogGroup.readString();
@@ -184,21 +166,8 @@
         }
       } catch (e) {
         await new Promise((r) => setTimeout(r, 500));
-        return await getCatalog(broadcast, catalogTrack);
+        return await getCatalog(broadcast);
       }
-    }
-
-    async function getCatalogTrack(broadcast){
-
-          const catalogTrack  = await broadcast.subscribe('catalog.json')
-
-          console.log("Catalog track")
-          console.log(await catalogTrack.state.closed);
-
-          return catalogTrack;
-
-          
-
     }
 
 
@@ -213,64 +182,31 @@
         const broadcast = connection.consume(broadcastName);
         log(`Consuming broadcast: ${broadcastName}`, 'info');
 
-        log(`Listening for catelog`);
-
-        const catalogTrack = await getCatalogTrack(broadcast);
-
-
-
-        console.log("Subscribed", catalogTrack.state)
- 
-        const catalog = await getCatalog(broadcast, catalogTrack);
+        const catalog = await getCatalog(broadcast);
 
         updateStatus('Subscribing to tracks...', 'info');
 
-        // Subscribe to video track
         const videoTrack = broadcast.subscribe('video');
         log('Subscribed to video track', 'success');
-/*
-        // Subscribe to audio track
-        const audioTrack = broadcast.subscribe('audio');
-        log('Subscribed to audio track', 'success');
-*/
-        updateStatus('Ready to receive data', 'success');
 
-        // Listen for video data
-        (async () => {
-          try {
-            while (true) {
-              const group = await videoTrack.nextGroup();
-              if (!group) break;
-              const frame = await group.readFrame();
+        updateStatus('Starting decoder...', 'info');
 
-              // TODO: Process video data
-            }
-          } catch (error) {
-            log('Video read error: ' + error.message, 'error');
+        subscriber = new MoqSubscriber(catalog, videoTrack, null);
+
+        // Start video decoding and rendering
+        await subscriber.startVideo((frame) => {
+          ctx.drawImage(frame, 0, 0, canvas.width, canvas.height);
+          frame.close();
+
+          frameCount++;
+          if (frameCount % 30 === 0) {
+            log(`Received ${frameCount} video frames`, 'info');
           }
-        })();
-/*
-        // Listen for audio data
-        (async () => {
-          try {
-            while (true) {
-              const group = await audioTrack.nextGroup();
-              if (!group) break;
+        });
 
+        updateStatus('Receiving stream', 'success');
+        log('Decoder started', 'success');
 
-              const frame = await group.readFrame();
-
-//              console.log("frame", frame)
-        
-
-              
-              // TODO: Process audio data
-            }
-          } catch (error) {
-            log('Audio read error: ' + error.message, 'error');
-          }
-        })();
-*/
       } catch (error) {
         updateStatus('Connection failed', 'error');
         log('Init error: ' + error.message, 'error');
