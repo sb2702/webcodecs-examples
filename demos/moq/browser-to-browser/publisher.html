@@ -128,12 +128,13 @@
 
 
     import * as Moq from 'https://esm.sh/@moq/lite';
+    import { MoqPublisher } from '../../../src/moq/moq-publisher.ts';
+    import { getSampleRate } from 'webcodecs-utils';
 
     // Get URL parameters
     const params = new URLSearchParams(window.location.search);
     const relayUrl = params.get('relay') || 'https://relay.quic.video:4443';
     const broadcastName = params.get('broadcast') || 'my-broadcast';
-    const trackName = params.get('track') || 'chat';
 
     // UI Elements
     const statusEl = document.getElementById('status');
@@ -148,6 +149,7 @@
     let videoTrack = null;
     let audioTrack = null;
     let stream = null;
+    let publisher = null;
 
     // Logging
     function log(message, type = 'info') {
@@ -208,6 +210,7 @@
         // Generate catalog from track settings
         const videoSettings = videoTrack.getSettings();
         const audioSettings = audioTrack.getSettings();
+        const sampleRate = await getSampleRate(audioTrack);
 
         const catalogData = {
           video: {
@@ -224,7 +227,7 @@
             renditions: {
               audio0: {
                 codec: 'mp4a.40.2',
-                sampleRate: audioSettings.sampleRate || 48000,
+                sampleRate: sampleRate,
                 numberOfChannels: audioSettings.channelCount || 2,
               }
             },
@@ -232,7 +235,7 @@
           }
         };
 
-        // Handle track requests in a loop
+        // Handle catalog requests
         (async () => {
           while (true) {
             const trackRequest = await broadcast.requested();
@@ -246,15 +249,14 @@
               group.writeString(catalogJson);
               group.close();
               log('Sent catalog', 'success');
-            } else if (requestedTrack.name === 'video') {
-              log('Video track requested (ready to send data)', 'success');
-              // TODO: Start sending video data
-            } else if (requestedTrack.name === 'audio') {
-              log('Audio track requested (ready to send data)', 'success');
-              // TODO: Start sending audio data
             }
           }
         })();
+
+        // Start MoQ publisher
+        publisher = new MoqPublisher(videoTrack, audioTrack, broadcast);
+        await publisher.start();
+        log('Publisher started', 'success');
 
       } catch (error) {
         updateStatus('Connection failed', 'error');

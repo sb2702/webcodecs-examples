@@ -164,10 +164,15 @@
 
     async function getCatalog(broadcast) {
       try {
+        
         const catalogTrack = broadcast.subscribe('catalog.json');
 
+
         for (;;) {
+          console.log("Catalog track", catalogTrack)
           const catalogGroup = await catalogTrack.nextGroup();
+
+          console.log("Group", catalogGroup)
 
           if (catalogGroup) {
             const catalogJson = await catalogGroup.readString();
@@ -196,7 +201,7 @@
         log(`Consuming broadcast: ${broadcastName}`, 'info');
 
         log(`Listening for catelog`);
-
+ 
         const catalog = await getCatalog(broadcast);
 
         updateStatus('Subscribing to tracks...', 'info');
