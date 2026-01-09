@@ -173,6 +173,25 @@
         const broadcast = connection.consume(broadcastName);
         log(`Consuming broadcast: "${broadcastName}"`, 'success');
 
+        // First, subscribe to catalog.json to get stream metadata
+        updateStatus('Fetching catalog.json...');
+        const catalogTrack = await broadcast.subscribe('catalog.json');
+        log('Subscribed to catalog.json', 'success');
+
+        // Read the first group which contains the catalog JSON
+        const catalogGroup = await catalogTrack.nextGroup();
+        if (!catalogGroup) {
+          throw new Error('No catalog data received');
+        }
+
+        const catalogJson = await catalogGroup.readString();
+        const catalog = JSON.parse(catalogJson);
+        log('Received catalog data', 'success');
+        console.log('Catalog:', catalog);
+
+        log(catalogJson, 'success');
+
+        // Now subscribe to the main track
         const track = await broadcast.subscribe(trackName);
         log(`Subscribed to track: "${trackName}"`, 'success');
         updateStatus(`✓ Listening to "${trackName}"`, 'success');

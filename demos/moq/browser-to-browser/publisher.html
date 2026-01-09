@@ -202,18 +202,30 @@ const catalogData =
         connection.publish(broadcastName, broadcast);
         log(`Published broadcast: "${broadcastName}"`, 'success');
 
-        updateStatus('Waiting for subscriber...');
-        const trackRequest = await broadcast.requested();
+        updateStatus('Waiting for track requests...');
 
-        track = trackRequest.track;
-        log(`Track requested: "${track.name}"`, 'success');
+        // Handle track requests in a loop
+        while (true) {
+          const trackRequest = await broadcast.requested();
+          const requestedTrack = trackRequest.track;
 
-        if (track.name === trackName) {
-          updateStatus(`✓ Ready to send on track "${trackName}"`, 'success');
-          sendBtn.disabled = false;
-        } else {
-          log(`Unexpected track name: "${track.name}"`, 'error');
-          updateStatus('Track name mismatch', 'error');
+          log(`Track requested: "${requestedTrack.name}"`, 'success');
+
+          if (requestedTrack.name === 'catalog.json') {
+            // Send catalog data as JSON
+            const catalogJson = JSON.stringify(catalogData);
+            const group = requestedTrack.appendGroup();
+            group.writeString(catalogJson);
+            group.close();
+            log('Sent catalog.json', 'success');
+          } else if (requestedTrack.name === trackName) {
+            // This is the main data track
+            track = requestedTrack;
+            updateStatus(`✓ Ready to send on track "${trackName}"`, 'success');
+            sendBtn.disabled = false;
+          } else {
+            log(`Unknown track requested: "${requestedTrack.name}"`, 'info');
+          }
         }
 
       } catch (error) {
