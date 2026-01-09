@@ -106,8 +106,11 @@
     <div id="status" class="status">Initializing...</div>
 
     <div class="controls">
-      <button id="sendBtn" disabled>Send Message</button>
+      <button id="startWebcamBtn">Start Webcam</button>
+      <button id="startPublishBtn" disabled>Start Publishing</button>
     </div>
+
+    <video id="preview" autoplay muted playsinline style="width: 100%; max-width: 355px; border-radius: 4px; margin: 10px 0;"></video>
 
     <div class="log" id="log"></div>
   </div>
@@ -124,36 +127,6 @@
 
 
 
-const catalogData = 
-
-        {
-          "video": {
-            "renditions": {
-              "video0": {
-                "codec": "avc1.64001f",
-                "description": "0164001fffe100196764001fac2484014016ec0440000003004000000c23c60c9201000568ee32c8b0",
-                "codedWidth": 1280,
-                "codedHeight": 720
-              }
-            },
-            "priority": 1
-          },
-          "audio": {
-            "renditions": {
-              "audio1": {
-                "codec": "mp4a.40.2",
-                "sampleRate": 44100,
-                "numberOfChannels": 2,
-                "bitrate": 283637
-              }
-            },
-            "priority": 2
-          }
-        };
-
-  
-
-
     import * as Moq from 'https://esm.sh/@moq/lite';
 
     // Get URL parameters
@@ -165,12 +138,16 @@ const catalogData =
     // UI Elements
     const statusEl = document.getElementById('status');
     const logEl = document.getElementById('log');
-    const sendBtn = document.getElementById('sendBtn');
+    const startWebcamBtn = document.getElementById('startWebcamBtn');
+    const startPublishBtn = document.getElementById('startPublishBtn');
+    const preview = document.getElementById('preview');
 
     // State
     let connection = null;
-    let track = null;
-    let messageCount = 0;
+    let broadcast = null;
+    let videoTrack = null;
+    let audioTrack = null;
+    let stream = null;
 
     // Logging
     function log(message, type = 'info') {
@@ -190,55 +167,106 @@ const catalogData =
       if (type === 'error') statusEl.className = 'status error';
     }
 
-    async function init() {
+    async function startWebcam() {
       try {
-        connection = await Moq.Connection.connect(new URL(relayUrl));
+        updateStatus('Requesting webcam access...', 'info');
 
-        const broadcast = new Moq.Broadcast();
-        connection.publish(broadcastName, broadcast);
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { width: 1280, height: 720 },
+          audio: true,
+        });
 
-        // Handle track requests in a loop
-        while (true) {
-          const trackRequest = await broadcast.requested();
-          const requestedTrack = trackRequest.track;
+        videoTrack = stream.getVideoTracks()[0];
+        audioTrack = stream.getAudioTracks()[0];
 
-          if (requestedTrack.name === 'catalog.json') {
-            // Send catalog data as JSON
-            const catalogJson = JSON.stringify(catalogData);
-            const group = requestedTrack.appendGroup();
-            group.writeString(catalogJson);
-            group.close();
-          } else if (requestedTrack.name === trackName) {
-            // This is the main data track
-            track = requestedTrack;
-            sendBtn.disabled = false;
-          }
-        }
+        preview.srcObject = stream;
 
+        updateStatus('Webcam ready', 'success');
+        log('Webcam started', 'success');
+
+        startWebcamBtn.disabled = true;
+        startPublishBtn.disabled = false;
       } catch (error) {
-        console.error('Init error:', error);
+        updateStatus('Failed to get webcam', 'error');
+        log('Webcam error: ' + error.message, 'error');
       }
     }
 
-    function sendMessage() {
-      if (!track) return;
-
+    async function startPublishing() {
       try {
-        messageCount++;
-        const message = `Hello from Publisher! (${messageCount})`;
-        const group = track.appendGroup();
-        group.writeString(message);
-        group.close();
+        updateStatus('Connecting to relay...', 'info');
+
+        connection = await Moq.Connection.connect(new URL(relayUrl));
+        broadcast = new Moq.Broadcast();
+        connection.publish(broadcastName, broadcast);
+
+        updateStatus('Publishing...', 'success');
+        log('Connected to relay', 'success');
+
+        startPublishBtn.disabled = true;
+
+        // Generate catalog from track settings
+        const videoSettings = videoTrack.getSettings();
+        const audioSettings = audioTrack.getSettings();
+
+        const catalogData = {
+          video: {
+            renditions: {
+              video0: {
+                codec: 'avc1.64001f',
+                codedWidth: videoSettings.width,
+                codedHeight: videoSettings.height,
+              }
+            },
+            priority: 1
+          },
+          audio: {
+            renditions: {
+              audio0: {
+                codec: 'mp4a.40.2',
+                sampleRate: audioSettings.sampleRate || 48000,
+                numberOfChannels: audioSettings.channelCount || 2,
+              }
+            },
+            priority: 2
+          }
+        };
+
+        // Handle track requests in a loop
+        (async () => {
+          while (true) {
+            const trackRequest = await broadcast.requested();
+            const requestedTrack = trackRequest.track;
+
+            log(`Track requested: ${requestedTrack.name}`, 'info');
+
+            if (requestedTrack.name === 'catalog.json') {
+              const catalogJson = JSON.stringify(catalogData);
+              const group = requestedTrack.appendGroup();
+              group.writeString(catalogJson);
+              group.close();
+              log('Sent catalog', 'success');
+            } else if (requestedTrack.name === 'video') {
+              log('Video track requested (ready to send data)', 'success');
+              // TODO: Start sending video data
+            } else if (requestedTrack.name === 'audio') {
+              log('Audio track requested (ready to send data)', 'success');
+              // TODO: Start sending audio data
+            }
+          }
+        })();
+
       } catch (error) {
-        console.error('Send error:', error);
+        updateStatus('Connection failed', 'error');
+        log('Error: ' + error.message, 'error');
       }
     }
 
     // Event listeners
-    sendBtn.addEventListener('click', sendMessage);
+    startWebcamBtn.addEventListener('click', startWebcam);
+    startPublishBtn.addEventListener('click', startPublishing);
 
-    // Initialize
-    init();
+    updateStatus('Ready to start', 'info');
   </script>
 </body>
 </html>

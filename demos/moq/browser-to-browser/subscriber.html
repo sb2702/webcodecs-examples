@@ -117,7 +117,6 @@
     const params = new URLSearchParams(window.location.search);
     const relayUrl = params.get('relay') || 'https://relay.quic.video:4443';
     const broadcastName = params.get('broadcast') || 'my-broadcast';
-    const trackName = params.get('track') || 'chat';
 
     // UI Elements
     const statusEl = document.getElementById('status');
@@ -163,52 +162,27 @@
 
 
 
-    async function getCatalog(broadcast){
+    async function getCatalog(broadcast) {
+      try {
+        log('Subscribing to catalog.json', 'info');
+        const catalogTrack = broadcast.subscribe('catalog.json');
 
+        for (;;) {
+          const catalogGroup = await catalogTrack.nextGroup();
 
-           // First, subscribe to catalog.json to get stream metadata
-
-           console.log("try again")
-
-           try{
-            
-
-            const catalogTrack = broadcast.subscribe('catalog.json');
-
-
-            for (;;) {
-
-
-            // Read the first group which contains the catalog JSON
-            const catalogGroup = await catalogTrack.nextGroup();
-
-
-            if(catalogGroup){
-
-
-              const catalogJson = await catalogGroup.readString();
-              const catalog = JSON.parse(catalogJson);
-              console.log('Catalog:', catalog);
-
-              break;
-            }
-
-            }
-
-
-           } catch(e){
-
-
-            console.log("Failed trying again");
-            await new Promise((r)=>setTimeout(500));
-
-            return await getCatalog(broadcast);
-
-           }
-
-
-    
-
+          if (catalogGroup) {
+            const catalogJson = await catalogGroup.readString();
+            const catalog = JSON.parse(catalogJson);
+            log('Received catalog', 'success');
+            console.log('Catalog:', catalog);
+            return catalog;
+          }
+        }
+      } catch (e) {
+        log('Failed to get catalog, retrying...', 'error');
+        await new Promise((r) => setTimeout(r, 500));
+        return await getCatalog(broadcast);
+      }
     }
 
 
@@ -216,39 +190,60 @@
 
     async function init() {
       try {
+        updateStatus('Connecting to relay...', 'info');
         connection = await Moq.Connection.connect(new URL(relayUrl));
+        log('Connected to relay', 'success');
 
         const broadcast = connection.consume(broadcastName);
+        log(`Consuming broadcast: ${broadcastName}`, 'info');
 
+        const catalog = await getCatalog(broadcast);
 
-        await getCatalog(broadcast);
+        updateStatus('Subscribing to tracks...', 'info');
 
-        console.log("Got catalog")
+        // Subscribe to video track
+        const videoTrack = broadcast.subscribe('video');
+        log('Subscribed to video track', 'success');
 
-   
-/*
-        // Now subscribe to the main track
-        const track = await broadcast.subscribe(trackName);
+        // Subscribe to audio track
+        const audioTrack = broadcast.subscribe('audio');
+        log('Subscribed to audio track', 'success');
 
-        // Listen for messages
+        updateStatus('Ready to receive data', 'success');
+
+        // Listen for video data
         (async () => {
           try {
             while (true) {
-              const group = await track.nextGroup();
+              const group = await videoTrack.nextGroup();
               if (!group) break;
 
-              const message = await group.readString();
-              if (!message) break;
-
-              displayMessage(message);
+              log('Received video group', 'info');
+              // TODO: Process video data
             }
           } catch (error) {
-            console.error('Read error:', error);
+            log('Video read error: ' + error.message, 'error');
           }
         })();
-*/
+
+        // Listen for audio data
+        (async () => {
+          try {
+            while (true) {
+              const group = await audioTrack.nextGroup();
+              if (!group) break;
+
+              log('Received audio group', 'info');
+              // TODO: Process audio data
+            }
+          } catch (error) {
+            log('Audio read error: ' + error.message, 'error');
+          }
+        })();
+
       } catch (error) {
-        console.error('Init error:', error);
+        updateStatus('Connection failed', 'error');
+        log('Init error: ' + error.message, 'error');
       }
     }
 
