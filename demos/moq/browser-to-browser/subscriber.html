@@ -164,7 +164,6 @@
 
     async function getCatalog(broadcast) {
       try {
-        log('Subscribing to catalog.json', 'info');
         const catalogTrack = broadcast.subscribe('catalog.json');
 
         for (;;) {
@@ -179,7 +178,6 @@
           }
         }
       } catch (e) {
-        log('Failed to get catalog, retrying...', 'error');
         await new Promise((r) => setTimeout(r, 500));
         return await getCatalog(broadcast);
       }
@@ -196,6 +194,8 @@
 
         const broadcast = connection.consume(broadcastName);
         log(`Consuming broadcast: ${broadcastName}`, 'info');
+
+        log(`Listening for catelog`);
 
         const catalog = await getCatalog(broadcast);
 
