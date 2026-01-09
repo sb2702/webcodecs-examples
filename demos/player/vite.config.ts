@@ -3,6 +3,9 @@ import { resolve } from 'path';
 
 // Demo build configuration for player
 export default defineConfig({
+  server: {
+    allowedHosts: true,
+ },
   root: resolve(__dirname, '../../'),
   publicDir: resolve(__dirname, '../../public'),
 

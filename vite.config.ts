@@ -3,6 +3,9 @@ import { resolve } from 'path';
 
 // Library build configuration
 export default defineConfig({
+  server: {
+     allowedHosts: true,
+  },
   build: {
     lib: {
       entry: resolve(__dirname, 'src/index.ts'),

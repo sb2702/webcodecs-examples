@@ -17,7 +17,7 @@
   ],
   "scripts": {
     "build": "tsc && vite build",
-    "dev:player": "vite --config demos/player/vite.config.ts",
+    "dev:player": "vite ",
     "build:player": "vite build --config demos/player/vite.config.ts",
     "dev:moq": "vite --config demos/moq/vite.config.ts",
     "build:moq": "vite build --config demos/moq/vite.config.ts",
