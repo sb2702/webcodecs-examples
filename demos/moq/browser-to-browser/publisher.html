@@ -208,27 +208,38 @@
 
         startPublishBtn.disabled = true;
 
-        // Generate catalog from track settings
+        // Create encoder configs
         const videoSettings = videoTrack.getSettings();
         const audioSettings = audioTrack.getSettings();
         const sampleRate = await getSampleRate(audioTrack);
 
         const codec = 'avc';
-
-        console.log("Getting description")
-
-        const description  = await MoqPublisher.getDescription(videoTrack);
-
-        console.log("Description", description);
-
-        
-        
         const bitrate = getBitrate(videoSettings.width, videoSettings.height, 30, 'good');
+        const codecString = getCodecString(codec, videoSettings.width, videoSettings.height, bitrate);
+
+        const videoConfig = {
+          codec: codecString,
+          width: videoSettings.width,
+          height: videoSettings.height,
+          bitrate: Math.round(bitrate),
+          framerate: 30,
+        };
+
+        const audioConfig = {
+          codec: 'mp4a.40.2',
+          sampleRate: sampleRate,
+          numberOfChannels: Math.min(audioSettings.channelCount || 2, 2),
+          bitrate: 128000,
+        };
+
+        // Get description using the same config
+        const description = await MoqPublisher.getDescription(videoTrack, videoConfig);
+
         const catalogData = {
           video: {
             renditions: {
               video0: {
-                codec: getCodecString(codec, videoSettings.width, videoSettings.height, bitrate),
+                codec: codecString,
                 codedWidth: videoSettings.width,
                 codedHeight: videoSettings.height,
                 description
@@ -238,11 +249,7 @@
           },
           audio: {
             renditions: {
-              audio0: {
-                codec: 'mp4a.40.2',
-                sampleRate: sampleRate,
-                numberOfChannels: audioSettings.channelCount || 2,
-              }
+              audio0: audioConfig
             },
             priority: 2
           }
@@ -266,8 +273,8 @@
           }
         })();
 
-        // Start MoQ publisher
-        publisher = new MoqPublisher(videoTrack, audioTrack, broadcast, codec);
+        // Start MoQ publisher with configs
+        publisher = new MoqPublisher(videoTrack, audioTrack, broadcast, videoConfig, audioConfig);
         await publisher.start();
         log('Publisher started', 'success');
 

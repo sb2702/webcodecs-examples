@@ -1,30 +1,32 @@
 import { MediaStreamTrackProcessor, getSampleRate } from 'webcodecs-utils';
-import { VideoEncoderStream } from '../webcam-recording/video-encoder-stream';
-import { AudioEncoderStream } from '../webcam-recording/audio-encoder-stream';
-import { isAACSupported } from '../webcam-recording/audio-codec-support';
+import { VideoEncoderStream } from './video-encoder-stream';
+import { AudioEncoderStream } from './audio-encoder-stream';
 
 export class MoqPublisher {
   private videoTrack: MediaStreamTrack;
   private audioTrack: MediaStreamTrack;
   private broadcast: any;
-  private codec: 'avc' | 'vp8' | 'vp9';
+  private videoConfig: VideoEncoderConfig;
+  private audioConfig: AudioEncoderConfig;
   private videoMoqTrack: any = null;
   private audioMoqTrack: any = null;
   private abortController: AbortController | null = null;
 
-  constructor(videoTrack: MediaStreamTrack, audioTrack: MediaStreamTrack, broadcast: any, codec: 'avc' | 'vp8' | 'vp9' = 'vp8') {
+  constructor(
+    videoTrack: MediaStreamTrack,
+    audioTrack: MediaStreamTrack,
+    broadcast: any,
+    videoConfig: VideoEncoderConfig,
+    audioConfig: AudioEncoderConfig
+  ) {
     this.videoTrack = videoTrack;
     this.audioTrack = audioTrack;
     this.broadcast = broadcast;
-    this.codec = codec;
+    this.videoConfig = videoConfig;
+    this.audioConfig = audioConfig;
   }
 
-  static async getDescription(videoTrack: MediaStreamTrack, codec: 'avc' | 'vp8' | 'vp9'): Promise<string> {
-    if (codec === 'vp8' || codec === 'vp9') {
-      return ''; // VP8/VP9 don't need description
-    }
-
-    const videoSettings = videoTrack.getSettings();
+  static async getDescription(videoTrack: MediaStreamTrack, config: VideoEncoderConfig): Promise<string> {
     const processor = new MediaStreamTrackProcessor({ track: videoTrack });
     const reader = processor.readable.getReader();
 
@@ -44,6 +46,8 @@ export class MoqPublisher {
             const description = new Uint8Array(meta.decoderConfig.description);
             const base64 = btoa(String.fromCharCode(...description));
             resolve(base64);
+          } else {
+            resolve(''); // VP8/VP9 don't have description
           }
         },
         error: (e) => {
@@ -52,14 +56,7 @@ export class MoqPublisher {
         },
       });
 
-      const bitrate = 1000000;
-      encoder.configure({
-        codec: 'avc1.42001f',
-        width: videoSettings.width!,
-        height: videoSettings.height!,
-        bitrate,
-      });
-
+      encoder.configure(config);
       encoder.encode(frame, { keyFrame: true });
       encoder.flush().then(() => {
         encoder.close();
@@ -73,31 +70,13 @@ export class MoqPublisher {
       throw new Error('Already publishing');
     }
 
-    const videoSettings = this.videoTrack.getSettings();
-    const audioSettings = this.audioTrack.getSettings();
-    const sampleRate = await getSampleRate(this.audioTrack);
-
-    if (!audioSettings.channelCount) {
-      audioSettings.channelCount = 1;
-    }
-
-    const useAAC = await isAACSupported(sampleRate, audioSettings.channelCount);
-
     // Video pipeline
     const videoProcessor = new MediaStreamTrackProcessor({ track: this.videoTrack });
-    const videoEncoderStream = new VideoEncoderStream(
-      videoSettings.width!,
-      videoSettings.height!,
-      videoSettings.frameRate || 30,
-      this.codec
-    );
+    const videoEncoderStream = new VideoEncoderStream(this.videoConfig);
 
     // Audio pipeline
     const audioProcessor = new MediaStreamTrackProcessor({ track: this.audioTrack });
-    const audioEncoderStream = new AudioEncoderStream(
-      sampleRate!,
-      Math.min(audioSettings.channelCount!, 2)
-    );
+    const audioEncoderStream = new AudioEncoderStream(this.audioConfig);
 
     this.abortController = new AbortController();
 
