@@ -1,4 +1,6 @@
-import * as Moq from '@moq/lite';
+// @ts-ignore
+import * as Moq from 'https://esm.sh/@moq/lite';
+
 
 
 // Endpoint configurations

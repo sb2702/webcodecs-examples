@@ -1,5 +1,6 @@
-import * as Moq from '@moq/lite';
-import { Effect, Signal } from "@moq/signals";
+// Load MoQ from CDN
+// @ts-ignore
+import * as Moq from 'https://esm.sh/@moq/lite';
 
 // Endpoint configurations
 const ENDPOINTS = {
