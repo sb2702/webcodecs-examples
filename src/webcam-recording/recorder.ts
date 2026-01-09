@@ -28,7 +28,6 @@ export class WebcamRecorder {
     if(!audioSettings.channelCount){
       audioSettings.channelCount = 1;
     }
-    console.log("Audio settings", audioSettings)
 
     const sampleRate = await getSampleRate(this.audioTrack);
 
@@ -44,8 +43,6 @@ export class WebcamRecorder {
     });
 
     const useAAC = await isAACSupported(sampleRate, audioSettings.channelCount);
-
-    console.log("USe AAC", useAAC)
 
     const muxer = new Muxer({
       target,
