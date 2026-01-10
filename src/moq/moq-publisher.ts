@@ -72,7 +72,7 @@ export class MoqPublisher {
 
     this.abortController = new AbortController();
     
-    for(;;){
+    for(;;){ // Listen for track requests
       const trackRequest = this.broadcast.requested();
       if(trackRequest) this.handleTrackRequest(trackRequest)
       await new Promise((r)=>requestAnimationFrame(r));
