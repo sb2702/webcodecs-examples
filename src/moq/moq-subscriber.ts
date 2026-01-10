@@ -54,18 +54,25 @@ export class MoqSubscriber {
           const group = await this.videoTrack.nextGroup();
           if (!group) break;
 
-          const frameData = await group.readFrame();
-          const frame = this.parseVideoFrame(frameData);
+          // First frame in group is always a keyframe
+          let isKeyframe = true;
 
-          const chunk = new EncodedVideoChunk({
-            timestamp: frame.timestamp,
-            type: frame.type!,
-            data: frame.data,
-          });
+          // Read all frames in the group
+          for (;;) {
+            const frameData = await group.readFrame();
+            if (!frameData) break;
 
-          group.close();
+            const frame = this.parseVideoFrame(frameData, isKeyframe);
 
-          this.videoDecoder!.decode(chunk);
+            const chunk = new EncodedVideoChunk({
+              timestamp: frame.timestamp,
+              type: frame.type!,
+              data: frame.data,
+            });
+
+            this.videoDecoder!.decode(chunk);
+            isKeyframe = false; // Subsequent frames are delta
+          }
         }
       } catch (error) {
         console.error('Video read error:', error);
@@ -112,13 +119,13 @@ export class MoqSubscriber {
     })();
   }
 
-  private parseVideoFrame(buffer: Uint8Array): MoqFrame {
-    // Hang format: [timestamp (8 bytes)] [type (1 byte)] [data]
+  private parseVideoFrame(buffer: Uint8Array, isKeyframe: boolean): MoqFrame {
+    // Hang format: [timestamp (8 bytes)] [data]
     const view = new DataView(buffer.buffer, buffer.byteOffset);
 
     const timestamp = Number(view.getBigUint64(0, true));
-    const type = buffer[8] === 1 ? 'key' : 'delta';
-    const data = buffer.slice(9);
+    const type = isKeyframe ? 'key' : 'delta';
+    const data = buffer.slice(8);
 
     return { timestamp, type, data };
   }

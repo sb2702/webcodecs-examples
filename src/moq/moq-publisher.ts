@@ -110,28 +110,42 @@ export class MoqPublisher {
   }
 
   private createVideoWriter(moqTrack: any): WritableStream<{ chunk: EncodedVideoChunk; meta: EncodedVideoChunkMetadata }> {
+    let currentGroup: any = null;
+
     return new WritableStream({
       async write(value) {
-        const group = moqTrack.appendGroup();
+        // Start new group on keyframe (GOP - group of pictures)
+        if (value.chunk.type === 'key') {
+          if (currentGroup) {
+            currentGroup.close();
+          }
+          currentGroup = moqTrack.appendGroup();
+        }
 
-        // Hang format: [timestamp (8 bytes)] [type (1 byte)] [data]
+        if (!currentGroup) {
+          // First chunk must be a keyframe
+          currentGroup = moqTrack.appendGroup();
+        }
+
+        // Hang format: [timestamp (8 bytes)] [data]
         const chunkData = new Uint8Array(value.chunk.byteLength);
         value.chunk.copyTo(chunkData);
 
-        const buffer = new Uint8Array(8 + 1 + chunkData.byteLength);
+        const buffer = new Uint8Array(8 + chunkData.byteLength);
         const view = new DataView(buffer.buffer);
 
         // Write timestamp as 64-bit integer (microseconds)
         view.setBigUint64(0, BigInt(value.chunk.timestamp), true);
 
-        // Write chunk type (1 = key, 0 = delta)
-        buffer[8] = value.chunk.type === 'key' ? 1 : 0;
-
         // Write chunk data
-        buffer.set(chunkData, 9);
+        buffer.set(chunkData, 8);
 
-        group.writeFrame(buffer);
-        group.close();
+        currentGroup.writeFrame(buffer);
+      },
+      async close() {
+        if (currentGroup) {
+          currentGroup.close();
+        }
       }
     });
   }
