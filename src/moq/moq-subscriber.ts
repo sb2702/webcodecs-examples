@@ -84,6 +84,8 @@ export class MoqSubscriber {
     // Get audio config from catalog
     const audioRendition = Object.values(this.catalog.audio.renditions)[0] as any;
 
+    console.log("Starting audio")
+
     this.audioDecoder = new AudioDecoder({
       output: onData,
       error: (e) => console.error('Audio decoder error:', e),
@@ -99,7 +101,9 @@ export class MoqSubscriber {
     (async () => {
       try {
         while (true) {
+           console.log("Waiting for next group")
           const group = await this.audioTrack.nextGroup();
+          console.log("Group")
           if (!group) break;
 
           const frameData = await group.readFrame();

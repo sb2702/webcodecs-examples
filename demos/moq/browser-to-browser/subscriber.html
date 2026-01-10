@@ -186,11 +186,17 @@
 
         updateStatus('Subscribing to tracks...', 'info');
 
-        const videoTrack = broadcast.subscribe('video');
+        const videoTrack = await broadcast.subscribe('video');
         log('Subscribed to video track', 'success');
 
-        const audioTrack = broadcast.subscribe('audio');
+
+        await new Promise((r)=>setTimeout(r), 500);
+
+       const audioTrack = await broadcast.subscribe('audio');
         log('Subscribed to audio track', 'success');
+
+     await new Promise((r)=>setTimeout(r), 500);
+
 
         updateStatus('Starting decoders...', 'info');
 
@@ -201,14 +207,15 @@
         subscriber = new MoqSubscriber(catalog, videoTrack, audioTrack);
 
         // Start video decoding and rendering
-        await subscriber.startVideo((frame) => {
+        subscriber.startVideo((frame) => {
           ctx.drawImage(frame, 0, 0, canvas.width, canvas.height);
           frame.close();
           frameCount++;
         });
 
         // Start audio decoding and playback
-        await subscriber.startAudio((audioData) => {
+        subscriber.startAudio((audioData) => {
+         console.log("audio data")
           audioPlayer.play(audioData);
           audioData.close();
         });

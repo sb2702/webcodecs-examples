@@ -81,32 +81,50 @@ export class MoqPublisher {
     this.abortController = new AbortController();
 
     // Listen for track requests
-    (async () => {
-      while (true) {
-        const trackRequest = await this.broadcast.requested();
-        const requestedTrack = trackRequest.track;
 
-        if (requestedTrack.name === 'video' && !this.videoMoqTrack) {
-          this.videoMoqTrack = requestedTrack;
 
-          // Start video pipeline
-          videoProcessor.readable
-            .pipeThrough(videoEncoderStream)
-            .pipeTo(this.createVideoWriter(this.videoMoqTrack), {
-              signal: this.abortController.signal
-            });
-        } else if (requestedTrack.name === 'audio' && !this.audioMoqTrack) {
-          this.audioMoqTrack = requestedTrack;
 
-          // Start audio pipeline
-          audioProcessor.readable
-            .pipeThrough(audioEncoderStream)
-            .pipeTo(this.createAudioWriter(this.audioMoqTrack), {
-              signal: this.abortController.signal
-            });
-        }
+    const handleRequest = async function(trackRequestP){
+      const trackRequest = await trackRequestP;
+
+      const requestedTrack = trackRequest.track;
+
+      if (requestedTrack.name === 'video' && !this.videoMoqTrack) {
+
+        this.videoMoqTrack = requestedTrack;
+
+        // Start video pipeline
+        videoProcessor.readable
+          .pipeThrough(videoEncoderStream)
+          .pipeTo(this.createVideoWriter(this.videoMoqTrack), {
+            signal: this.abortController.signal
+          });
+      } else if (requestedTrack.name === 'audio' && !this.audioMoqTrack) {
+        this.audioMoqTrack = requestedTrack;
+
+        // Start audio pipeline
+        audioProcessor.readable
+          .pipeThrough(audioEncoderStream)
+          .pipeTo(this.createAudioWriter(this.audioMoqTrack), {
+            signal: this.abortController.signal
+          });
       }
-    })();
+    }.bind(this);
+    
+
+    for(;;){
+
+      const trackRequest = this.broadcast.requested();
+      if(trackRequest){
+        handleRequest(trackRequest)
+      }
+      await new Promise((r)=>setTimeout(r, 100));
+
+    }
+
+    
+      
+
   }
 
   private createVideoWriter(moqTrack: any): WritableStream<{ chunk: EncodedVideoChunk; meta: EncodedVideoChunkMetadata }> {
