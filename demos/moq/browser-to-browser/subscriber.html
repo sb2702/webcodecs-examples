@@ -189,14 +189,8 @@
         const videoTrack = await broadcast.subscribe('video');
         log('Subscribed to video track', 'success');
 
-
-        await new Promise((r)=>setTimeout(r), 500);
-
        const audioTrack = await broadcast.subscribe('audio');
         log('Subscribed to audio track', 'success');
-
-     await new Promise((r)=>setTimeout(r), 500);
-
 
         updateStatus('Starting decoders...', 'info');
 
