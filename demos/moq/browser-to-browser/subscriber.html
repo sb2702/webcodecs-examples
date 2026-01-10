@@ -110,7 +110,7 @@
 
   <script type="module">
     import * as Moq from 'https://esm.sh/@moq/lite';
-    import { MoqSubscriber } from '../../../src/moq/moq-subscriber.ts';
+    import { MoqSubscriber, AudioPlayer } from '../../../src/moq/index.ts';
 
     // Get URL parameters
     const params = new URLSearchParams(window.location.search);
@@ -189,21 +189,32 @@
         const videoTrack = broadcast.subscribe('video');
         log('Subscribed to video track', 'success');
 
-        updateStatus('Starting decoder...', 'info');
+        const audioTrack = broadcast.subscribe('audio');
+        log('Subscribed to audio track', 'success');
 
-        subscriber = new MoqSubscriber(catalog, videoTrack, null);
+        updateStatus('Starting decoders...', 'info');
+
+        // Create audio player
+        const audioRendition = Object.values(catalog.audio.renditions)[0];
+        const audioPlayer = new AudioPlayer(audioRendition.sampleRate, audioRendition.numberOfChannels);
+
+        subscriber = new MoqSubscriber(catalog, videoTrack, audioTrack);
 
         // Start video decoding and rendering
         await subscriber.startVideo((frame) => {
           ctx.drawImage(frame, 0, 0, canvas.width, canvas.height);
           frame.close();
-
           frameCount++;
-   
+        });
+
+        // Start audio decoding and playback
+        await subscriber.startAudio((audioData) => {
+          audioPlayer.play(audioData);
+          audioData.close();
         });
 
         updateStatus('Receiving stream', 'success');
-        log('Decoder started', 'success');
+        log('Decoders started', 'success');
 
       } catch (error) {
         updateStatus('Connection failed', 'error');
