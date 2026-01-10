@@ -215,7 +215,6 @@
 
         // Start audio decoding and playback
         subscriber.startAudio((audioData) => {
-         console.log("audio data")
           audioPlayer.play(audioData);
           audioData.close();
         });

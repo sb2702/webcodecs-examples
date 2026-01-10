@@ -21,7 +21,6 @@ export class AudioPlayer {
       numberOfFrames,
       this.sampleRate
     );
-    console.log("Playing audio")
 
     // Copy data for each channel
     for (let channel = 0; channel < this.numberOfChannels; channel++) {

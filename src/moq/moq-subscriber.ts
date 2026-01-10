@@ -32,8 +32,6 @@ export class MoqSubscriber {
       codedHeight: videoRendition.codedHeight,
     };
 
-    console.log("Video rendition");
-    console.log(this.catalog)
     // Add description if it exists (required for AVC)
     if (videoRendition.description) {
       const base64 = videoRendition.description;
@@ -101,9 +99,8 @@ export class MoqSubscriber {
     (async () => {
       try {
         while (true) {
-           console.log("Waiting for next group")
+
           const group = await this.audioTrack.nextGroup();
-          console.log("Group")
           if (!group) break;
 
           const frameData = await group.readFrame();
