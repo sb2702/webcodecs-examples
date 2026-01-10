@@ -12,3 +12,8 @@ export { MoqPublisher } from './moq/moq-publisher';
 export { MoqSubscriber } from './moq/moq-subscriber';
 export { AudioPlayer } from './moq/audio-player';
 export type { MoqFrame } from './moq/moq-subscriber';
+
+import {getSampleRate, getBitrate, getCodecString } from 'webcodecs-utils'
+
+export {getSampleRate, getBitrate, getCodecString }
+
