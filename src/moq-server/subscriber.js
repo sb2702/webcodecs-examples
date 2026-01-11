@@ -123,7 +123,9 @@ async function startRecording(ws, config) {
     outputPath,
     startTime: Date.now(),
     videoFrames: 0,
-    audioFrames: 0
+    audioFrames: 0,
+    firstVideoTimestamp: null,
+    firstAudioTimestamp: null
   };
 
   recordingClient = ws;
@@ -168,8 +170,6 @@ async function stopRecording() {
  * Handle incoming frame data
  */
 
-let startedYet = false;
-
 async function handleFrame(frame) {
   try {
     // Always cache decoderConfig (even when not recording)
@@ -186,20 +186,32 @@ async function handleFrame(frame) {
       return;
     }
 
-    if(frame.type === 'video' && frame.keyframe){
-      startedYet = true;
-    }
-    if(!startedYet) return;
-
     if (frame.type === 'video') {
+      // Set first timestamp on first keyframe
+      if (frame.keyframe && currentRecording.firstVideoTimestamp === null) {
+        currentRecording.firstVideoTimestamp = frame.timestamp;
+      }
+
+      // Skip frames until we have a keyframe
+      if (currentRecording.firstVideoTimestamp === null) {
+        return;
+      }
+
+      const relativeTimestamp = (frame.timestamp - currentRecording.firstVideoTimestamp) / 1e6;
       const packetType = frame.keyframe ? 'key' : 'delta';
-      const packet = new EncodedPacket(frame.data, packetType, frame.timestamp, frame.duration);
+      const packet = new EncodedPacket(frame.data, packetType, relativeTimestamp, frame.duration / 1e6);
 
       // Pass decoderConfig as meta
       currentRecording.videoSource.add(packet, videoDecoderConfig ? { decoderConfig: videoDecoderConfig } : undefined);
       currentRecording.videoFrames++;
     } else if (frame.type === 'audio') {
-      const packet = new EncodedPacket(frame.data, 'key', frame.timestamp, frame.duration);
+      // Set first timestamp on first audio frame
+      if (currentRecording.firstAudioTimestamp === null) {
+        currentRecording.firstAudioTimestamp = frame.timestamp;
+      }
+
+      const relativeTimestamp = (frame.timestamp - currentRecording.firstAudioTimestamp) / 1e6;
+      const packet = new EncodedPacket(frame.data, 'key', relativeTimestamp, frame.duration / 1e6);
 
       // Pass decoderConfig as meta
       currentRecording.audioSource.add(packet, audioDecoderConfig ? { decoderConfig: audioDecoderConfig } : undefined);

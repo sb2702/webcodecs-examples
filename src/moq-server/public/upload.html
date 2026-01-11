@@ -453,6 +453,7 @@
       constructor(config) {
         let encoder;
         let frameIndex = 0;
+        const frameDuration = Math.floor(1000000 / (config.framerate || 30)); // microseconds per frame
 
         super({
           start(controller) {
@@ -471,8 +472,19 @@
             while (encoder.encodeQueueSize >= 20) {
               await new Promise(r => setTimeout(r, 10));
             }
-            encoder.encode(frame, { keyFrame: frameIndex % 60 === 0 });
-            frame.close();
+
+            // Create new frame with duration if not set
+            let frameToEncode = frame;
+            if (!frame.duration) {
+              frameToEncode = new VideoFrame(frame, {
+                timestamp: frame.timestamp,
+                duration: frameDuration
+              });
+              frame.close();
+            }
+
+            encoder.encode(frameToEncode, { keyFrame: frameIndex % 60 === 0 });
+            frameToEncode.close();
             frameIndex++;
           },
           async flush() {
@@ -491,7 +503,6 @@
           start(controller) {
             encoder = new AudioEncoder({
               output: (chunk, meta) => {
-
                 controller.enqueue({ chunk, meta });
               },
               error: (e) => {
