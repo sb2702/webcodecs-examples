@@ -1,6 +1,6 @@
 import express from 'express';
 import { WebSocketServer } from 'ws';
-import { Output, EncodedPacket, EncodedVideoPacketSource,EncodedAudioPacketSource, FilePathTarget, BufferTarget, Mp4OutputFormat, WebMOutputFormat } from 'mediabunny';
+import { Output, EncodedPacket, EncodedVideoPacketSource,EncodedAudioPacketSource, FilePathTarget,  Mp4OutputFormat, WebMOutputFormat } from 'mediabunny';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import fs from 'fs';
@@ -98,10 +98,8 @@ async function startRecording(ws, config) {
 
   // Create output using MediaBunny API
   const output = new Output({
-    format: new Mp4OutputFormat({
-      fastStart: 'in-memory'
-    }),
-    target: new BufferTarget(),
+    format: new Mp4OutputFormat(),
+    target: new FilePathTarget(outputPath),
   });
 
   // Create video source
@@ -157,29 +155,11 @@ async function stopRecording() {
 
   currentRecording = null;
   //recordingClient = null;
-
   // Finalize the output file
   await output.finalize();
 
-  console.log(output.target.buffer)
-
-  const buffer = Buffer.from(output.target.buffer);
-
-// Specify the file path
-const filePath = 'output.mp4';
-
-// Write the buffer to the file asynchronously
-fs.writeFileSync(filePath, buffer);
-
-  const stats = {
-
-
-  };
-
-
-
   console.log(`Recording saved: ${outputPath}`);
-  return stats;
+  return {};
 }
 
 /**

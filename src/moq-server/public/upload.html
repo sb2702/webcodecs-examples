@@ -475,7 +475,7 @@
               frame.close();
             }
 
-            encoder.encode(frameToEncode, { keyFrame: frameIndex % 1 === 0 });
+            encoder.encode(frameToEncode, { keyFrame: frameIndex % 60 === 0 });
             frameToEncode.close();
             frameIndex++;
           },
