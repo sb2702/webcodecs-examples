@@ -1,0 +1,11 @@
+{
+  "name": "moq-server",
+  "version": "0.0.1",
+  "description": "Test server for demoing server-side moq integration",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "Sam Bhattacharyya",
+  "license": "MIT"
+}
