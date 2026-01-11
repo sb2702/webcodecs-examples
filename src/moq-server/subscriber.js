@@ -149,18 +149,18 @@ async function stopRecording() {
 
   const { output, outputPath } = currentRecording;
 
+  currentRecording = null;
+  //recordingClient = null;
+
   // Finalize the output file
   await output.finalize();
 
   const stats = {
-    outputPath,
-    duration: Date.now() - currentRecording.startTime,
-    videoFrames: currentRecording.videoFrames,
-    audioFrames: currentRecording.audioFrames
+
+
   };
 
-  currentRecording = null;
-  recordingClient = null;
+
 
   console.log(`Recording saved: ${outputPath}`);
   return stats;
@@ -169,6 +169,10 @@ async function stopRecording() {
 /**
  * Handle incoming frame data
  */
+
+
+let addedAudioConfig = false;
+let addedVideoConfig  = false;
 
 async function handleFrame(frame) {
   try {
@@ -197,12 +201,20 @@ async function handleFrame(frame) {
         return;
       }
 
-      const relativeTimestamp = (frame.timestamp - currentRecording.firstVideoTimestamp) / 1e6;
+      const relativeTimestamp = (frame.timestamp - currentRecording.firstVideoTimestamp);
       const packetType = frame.keyframe ? 'key' : 'delta';
-      const packet = new EncodedPacket(frame.data, packetType, relativeTimestamp, frame.duration / 1e6);
+      const packet = new EncodedPacket(frame.data, packetType, relativeTimestamp/1e6, frame.duration/1e6);
 
       // Pass decoderConfig as meta
-      currentRecording.videoSource.add(packet, videoDecoderConfig ? { decoderConfig: videoDecoderConfig } : undefined);
+//  currentRecording.videoSource.add(packet, videoDecoderConfig ? { decoderConfig: videoDecoderConfig } : undefined);
+
+      if(!addedVideoConfig){
+        currentRecording.videoSource.add(packet, { decoderConfig: videoDecoderConfig });
+        addedVideoConfig = true;
+      } else{
+        currentRecording.videoSource.add(packet);
+      }
+
       currentRecording.videoFrames++;
     } else if (frame.type === 'audio') {
       // Set first timestamp on first audio frame
@@ -210,11 +222,19 @@ async function handleFrame(frame) {
         currentRecording.firstAudioTimestamp = frame.timestamp;
       }
 
-      const relativeTimestamp = (frame.timestamp - currentRecording.firstAudioTimestamp) / 1e6;
-      const packet = new EncodedPacket(frame.data, 'key', relativeTimestamp, frame.duration / 1e6);
+      const relativeTimestamp = (frame.timestamp - currentRecording.firstAudioTimestamp);
+      const packet = new EncodedPacket(frame.data, 'key', relativeTimestamp/1e6, frame.duration/1e6);
 
       // Pass decoderConfig as meta
-      currentRecording.audioSource.add(packet, audioDecoderConfig ? { decoderConfig: audioDecoderConfig } : undefined);
+
+
+
+      if(!addedAudioConfig){
+        currentRecording.audioSource.add(packet, { decoderConfig: audioDecoderConfig } );
+      } else{
+        currentRecording.audioSource.add(packet);
+      }
+
       currentRecording.audioFrames++;
     }
   } catch (error) {
