@@ -421,6 +421,95 @@
       }
     }
 
+    // Create encoder transform streams
+    class VideoEncoderTransform extends TransformStream {
+      constructor(config) {
+        let encoder;
+        let frameIndex = 0;
+
+        super({
+          start(controller) {
+            encoder = new VideoEncoder({
+              output: (chunk, meta) => {
+                controller.enqueue({ chunk, meta, isKeyframe: chunk.type === 'key' });
+              },
+              error: (e) => {
+                log('Video encoder error: ' + e.message, 'error');
+                controller.error(e);
+              }
+            });
+            encoder.configure(config);
+          },
+          async transform(frame, controller) {
+            while (encoder.encodeQueueSize >= 20) {
+              await new Promise(r => setTimeout(r, 10));
+            }
+            encoder.encode(frame, { keyFrame: frameIndex % 60 === 0 });
+            frame.close();
+            frameIndex++;
+          },
+          async flush() {
+            await encoder.flush();
+            encoder.close();
+          }
+        }, { highWaterMark: 10 });
+      }
+    }
+
+    class AudioEncoderTransform extends TransformStream {
+      constructor(config) {
+        let encoder;
+
+        super({
+          start(controller) {
+            encoder = new AudioEncoder({
+              output: (chunk) => {
+                controller.enqueue(chunk);
+              },
+              error: (e) => {
+                log('Audio encoder error: ' + e.message, 'error');
+                controller.error(e);
+              }
+            });
+            encoder.configure(config);
+          },
+          async transform(audioData, controller) {
+            while (encoder.encodeQueueSize >= 20) {
+              await new Promise(r => setTimeout(r, 10));
+            }
+            encoder.encode(audioData);
+            audioData.close();
+          },
+          async flush() {
+            await encoder.flush();
+            encoder.close();
+          }
+        }, { highWaterMark: 10 });
+      }
+    }
+
+    // WebSocket writer
+    function createWebSocketWriter(type) {
+      return new WritableStream({
+        write(data) {
+          if (ws && ws.readyState === WebSocket.OPEN) {
+            const chunk = type === 'video' ? data.chunk : data;
+            const isKeyframe = type === 'video' ? data.isKeyframe : false;
+            const buffer = encodeFrame(type === 'video' ? 0 : 1, chunk, isKeyframe);
+            ws.send(buffer);
+
+            if (type === 'video') {
+              videoFrameCount++;
+            } else {
+              audioFrameCount++;
+            }
+          }
+        }
+      });
+    }
+
+    let abortController = null;
+
     async function startStreaming() {
       try {
         updatePublisherStatus('Starting encoders...', 'info');
@@ -433,96 +522,55 @@
         const bitrate = getBitrate(videoSettings.width, videoSettings.height, 30, 'good');
         const codecString = getCodecString(codec, videoSettings.width, videoSettings.height, bitrate);
 
-        // Create video encoder
-        let frameIndex = 0;
-        videoEncoder = new VideoEncoder({
-          output: (chunk, meta) => {
-
-
-            console.log("Chunk", chunk)
-
-            if (streaming && ws && ws.readyState === WebSocket.OPEN) {
-              const isKeyframe = chunk.type === 'key';
-              const buffer = encodeFrame(0, chunk, isKeyframe);
-              ws.send(buffer);
-              videoFrameCount++;
-            }
-          },
-          error: (e) => {
-            log('Video encoder error: ' + e.message, 'error');
-          }
-        });
-
-        videoEncoder.configure({
+        const videoConfig = {
           codec: codecString,
           width: videoSettings.width,
           height: videoSettings.height,
           bitrate: Math.round(bitrate),
           framerate: 30,
-        });
+        };
 
-        // Create audio encoder
-        audioEncoder = new AudioEncoder({
-          output: (chunk) => {
-            if (streaming && ws && ws.readyState === WebSocket.OPEN) {
-              const buffer = encodeFrame(1, chunk, false);
-              ws.send(buffer);
-              audioFrameCount++;
-            }
-          },
-          error: (e) => {
-            log('Audio encoder error: ' + e.message, 'error');
-          }
-        });
-
-        audioEncoder.configure({
+        const audioConfig = {
           codec: 'opus',
           sampleRate: sampleRate,
           numberOfChannels: Math.min(audioSettings.channelCount || 2, 2),
           bitrate: 128000,
-        });
+        };
 
-        // Start processing video frames
-        videoProcessor = new MediaStreamTrackProcessor({ track: videoTrack });
-        const videoReader = videoProcessor.readable.getReader();
+        // Create processors
+        const videoProcessor = new MediaStreamTrackProcessor({ track: videoTrack });
+        const audioProcessor = new MediaStreamTrackProcessor({ track: audioTrack });
 
-        (async () => {
-          while (streaming) {
-
-            console.log("Reading")
-            const { done, value: frame } = await videoReader.read();
-            if (done) break;
-
-            if (videoEncoder.encodeQueueSize < 5) {
-              videoEncoder.encode(frame, { keyFrame: frameIndex % 60 === 0 });
-              frameIndex++;
-            }
-            frame.close();
-          }
-        })();
-
-        // Start processing audio frames
-        audioProcessor = new MediaStreamTrackProcessor({ track: audioTrack });
-        const audioReader = audioProcessor.readable.getReader();
-
-        (async () => {
-          while (streaming) {
-            const { done, value: audioData } = await audioReader.read();
-            if (done) break;
-
-            if (audioEncoder.encodeQueueSize < 5) {
-              audioEncoder.encode(audioData);
-            }
-            audioData.close();
-          }
-        })();
+        // Create encoder streams
+        const videoEncoderStream = new VideoEncoderTransform(videoConfig);
+        const audioEncoderStream = new AudioEncoderTransform(audioConfig);
 
         streaming = true;
         startTime = Date.now();
         videoFrameCount = 0;
         audioFrameCount = 0;
-
         statsInterval = setInterval(updateStats, 100);
+
+        abortController = new AbortController();
+
+        // Start pipelines
+        videoProcessor.readable
+          .pipeThrough(videoEncoderStream)
+          .pipeTo(createWebSocketWriter('video'), { signal: abortController.signal })
+          .catch(e => {
+            if (e.name !== 'AbortError') {
+              log('Video pipeline error: ' + e.message, 'error');
+            }
+          });
+
+        audioProcessor.readable
+          .pipeThrough(audioEncoderStream)
+          .pipeTo(createWebSocketWriter('audio'), { signal: abortController.signal })
+          .catch(e => {
+            if (e.name !== 'AbortError') {
+              log('Audio pipeline error: ' + e.message, 'error');
+            }
+          });
 
         updatePublisherStatus('Streaming to server', 'success');
         log('Started streaming', 'success');
@@ -545,16 +593,9 @@
         statsInterval = null;
       }
 
-      if (videoEncoder) {
-        await videoEncoder.flush();
-        videoEncoder.close();
-        videoEncoder = null;
-      }
-
-      if (audioEncoder) {
-        await audioEncoder.flush();
-        audioEncoder.close();
-        audioEncoder = null;
+      if (abortController) {
+        abortController.abort();
+        abortController = null;
       }
 
       updatePublisherStatus('Stopped streaming', 'info');
