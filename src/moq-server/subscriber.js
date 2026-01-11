@@ -168,6 +168,7 @@ async function stopRecording() {
  * Handle incoming frame data
  */
 
+let startedYet = false;
 
 async function handleFrame(frame) {
   try {
@@ -184,6 +185,11 @@ async function handleFrame(frame) {
     if (!currentRecording) {
       return;
     }
+
+    if(frame.type === 'video' && frame.keyframe){
+      startedYet = true;
+    }
+    if(!startedYet) return;
 
     if (frame.type === 'video') {
       const packetType = frame.keyframe ? 'key' : 'delta';
