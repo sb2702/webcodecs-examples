@@ -70,14 +70,6 @@
       cursor: not-allowed;
     }
 
-    button.secondary {
-      background: #718096;
-    }
-
-    button.secondary:hover:not(:disabled) {
-      background: #4a5568;
-    }
-
     button.danger {
       background: #e53e3e;
     }
@@ -127,35 +119,6 @@
       background: #000;
     }
 
-    .config {
-      background: #f7fafc;
-      padding: 15px;
-      border-radius: 4px;
-      margin-bottom: 15px;
-    }
-
-    .config-row {
-      display: flex;
-      gap: 10px;
-      margin-bottom: 10px;
-      align-items: center;
-    }
-
-    .config-row label {
-      min-width: 140px;
-      font-size: 13px;
-      font-weight: 500;
-      color: #4a5568;
-    }
-
-    .config-row input {
-      flex: 1;
-      padding: 8px;
-      border: 1px solid #cbd5e0;
-      border-radius: 4px;
-      font-size: 13px;
-    }
-
     .log {
       background: #1a202c;
       color: #e2e8f0;
@@ -183,14 +146,42 @@
       margin-right: 8px;
       font-size: 11px;
     }
+
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 10px;
+      margin-top: 15px;
+    }
+
+    .stat {
+      background: #f7fafc;
+      padding: 10px;
+      border-radius: 4px;
+      border: 1px solid #e2e8f0;
+    }
+
+    .stat-label {
+      font-size: 11px;
+      color: #718096;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .stat-value {
+      font-size: 20px;
+      font-weight: 600;
+      color: #2d3748;
+      margin-top: 5px;
+    }
   </style>
 </head>
 <body>
   <div class="container">
-    <h1>📹 Browser to Server Recording</h1>
+    <h1>📹 Browser to Server Recording (WebSocket)</h1>
     <p class="description">
-      Stream your webcam to a Node.js server via Media over Quic (MoQ). The server subscribes to the MoQ broadcast
-      and saves the video to a file using MediaBunny.
+      Stream your webcam to a Node.js server via WebSocket. The server receives encoded video/audio chunks
+      and saves them to a file using MediaBunny.
     </p>
 
     <!-- Publisher Section -->
@@ -198,24 +189,29 @@
       <h3>📤 Browser Publisher</h3>
       <div id="publisherStatus" class="status">Ready to start</div>
 
-      <div class="config">
-        <div class="config-row">
-          <label>Broadcast Name:</label>
-          <input type="text" id="broadcastName" value="server-recording" />
-        </div>
-        <div class="config-row">
-          <label>Relay URL:</label>
-          <input type="text" id="relayUrl" value="http://localhost:4443" />
-        </div>
-      </div>
-
       <div class="controls">
         <button id="startWebcamBtn">Start Webcam</button>
-        <button id="startPublishBtn" disabled>Start Publishing</button>
-        <button id="stopPublishBtn" class="danger" disabled>Stop Publishing</button>
+        <button id="connectBtn" disabled>Connect to Server</button>
+        <button id="startStreamBtn" disabled>Start Streaming</button>
+        <button id="stopStreamBtn" class="danger" disabled>Stop Streaming</button>
       </div>
 
       <video id="preview" autoplay muted playsinline></video>
+
+      <div class="stats">
+        <div class="stat">
+          <div class="stat-label">Video Frames</div>
+          <div class="stat-value" id="videoFrameCount">0</div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">Audio Frames</div>
+          <div class="stat-value" id="audioFrameCount">0</div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">Duration</div>
+          <div class="stat-value" id="duration">0s</div>
+        </div>
+      </div>
     </div>
 
     <!-- Server Section -->
@@ -226,7 +222,6 @@
       <div class="controls">
         <button id="startRecordingBtn" disabled>Start Server Recording</button>
         <button id="stopRecordingBtn" class="danger" disabled>Stop Server Recording</button>
-        <button id="checkStatusBtn" class="secondary">Check Server Status</button>
       </div>
 
       <div class="log" id="log"></div>
@@ -234,31 +229,37 @@
   </div>
 
   <script type="module">
-    import * as Moq from 'https://esm.sh/@moq/lite';
-
-    import { MoqPublisher, getSampleRate, getBitrate, getCodecString  } from 'https://cdn.jsdelivr.net/npm/webcodecs-examples@0.1.14/dist/index.js';
+    import {  getSampleRate, getBitrate, getCodecString } from 'https://cdn.jsdelivr.net/npm/webcodecs-examples@0.1.14/dist/index.js';
 
     // UI Elements
     const publisherStatus = document.getElementById('publisherStatus');
     const serverStatus = document.getElementById('serverStatus');
     const logEl = document.getElementById('log');
     const startWebcamBtn = document.getElementById('startWebcamBtn');
-    const startPublishBtn = document.getElementById('startPublishBtn');
-    const stopPublishBtn = document.getElementById('stopPublishBtn');
+    const connectBtn = document.getElementById('connectBtn');
+    const startStreamBtn = document.getElementById('startStreamBtn');
+    const stopStreamBtn = document.getElementById('stopStreamBtn');
     const startRecordingBtn = document.getElementById('startRecordingBtn');
     const stopRecordingBtn = document.getElementById('stopRecordingBtn');
-    const checkStatusBtn = document.getElementById('checkStatusBtn');
     const preview = document.getElementById('preview');
-    const broadcastNameInput = document.getElementById('broadcastName');
-    const relayUrlInput = document.getElementById('relayUrl');
+    const videoFrameCountEl = document.getElementById('videoFrameCount');
+    const audioFrameCountEl = document.getElementById('audioFrameCount');
+    const durationEl = document.getElementById('duration');
 
     // State
     let stream = null;
     let videoTrack = null;
     let audioTrack = null;
-    let moqConnection = null;
-    let broadcast = null;
-    let publisher = null;
+    let ws = null;
+    let videoEncoder = null;
+    let audioEncoder = null;
+    let videoProcessor = null;
+    let audioProcessor = null;
+    let streaming = false;
+    let videoFrameCount = 0;
+    let audioFrameCount = 0;
+    let startTime = 0;
+    let statsInterval = null;
 
     function log(message, type = 'info') {
       const entry = document.createElement('div');
@@ -280,6 +281,33 @@
       serverStatus.className = `status ${type}`;
     }
 
+    function updateStats() {
+      videoFrameCountEl.textContent = videoFrameCount;
+      audioFrameCountEl.textContent = audioFrameCount;
+      if (startTime > 0) {
+        const duration = Math.floor((Date.now() - startTime) / 1000);
+        durationEl.textContent = `${duration}s`;
+      }
+    }
+
+    /**
+     * Encode frame in binary format: [type (1 byte)][timestamp (8 bytes)][keyframe (1 byte)][data]
+     */
+    function encodeFrame(type, chunk, isKeyframe = false) {
+      const chunkData = new Uint8Array(chunk.byteLength);
+      chunk.copyTo(chunkData);
+
+      const buffer = new Uint8Array(10 + chunkData.byteLength);
+      const view = new DataView(buffer.buffer);
+
+      view.setUint8(0, type); // 0 = video, 1 = audio
+      view.setBigUint64(1, BigInt(chunk.timestamp), true);
+      view.setUint8(9, isKeyframe ? 1 : 0);
+      buffer.set(chunkData, 10);
+
+      return buffer;
+    }
+
     async function startWebcam() {
       try {
         updatePublisherStatus('Requesting webcam access...', 'info');
@@ -297,27 +325,106 @@
         log('Webcam started', 'success');
 
         startWebcamBtn.disabled = true;
-        startPublishBtn.disabled = false;
+        connectBtn.disabled = false;
       } catch (error) {
         updatePublisherStatus('Failed to get webcam', 'error');
         log('Webcam error: ' + error.message, 'error');
       }
     }
 
-    async function startPublishing() {
+    async function connectToServer() {
       try {
-        const relayUrl = relayUrlInput.value;
-        const broadcastName = broadcastNameInput.value;
+        updatePublisherStatus('Connecting to server...', 'info');
 
-        updatePublisherStatus('Connecting to relay...', 'info');
+        ws = new WebSocket('ws://localhost:3000');
 
-        moqConnection = await Moq.Connection.connect(new URL(relayUrl));
-        broadcast = new Moq.Broadcast();
-        moqConnection.publish(broadcastName, broadcast);
+        ws.onopen = async () => {
+          updatePublisherStatus('Connected to server', 'success');
+          updateServerStatus('Connected', 'success');
+          log('Connected to WebSocket server', 'success');
 
-        log('Connected to relay', 'success');
+          connectBtn.disabled = true;
+          startStreamBtn.disabled = false;
 
-        // Create encoder configs
+          // Send config
+          const videoSettings = videoTrack.getSettings();
+          const audioSettings = audioTrack.getSettings();
+          const sampleRate = await getSampleRate(audioTrack);
+
+          const codec = 'avc';
+          const bitrate = getBitrate(videoSettings.width, videoSettings.height, 30, 'good');
+          const codecString = getCodecString(codec, videoSettings.width, videoSettings.height, bitrate);
+
+          const config = {
+            type: 'config',
+            video: {
+              codec: codecString,
+              width: videoSettings.width,
+              height: videoSettings.height,
+              bitrate: Math.round(bitrate),
+              framerate: 30,
+            },
+            audio: {
+              codec: 'opus',
+              sampleRate: sampleRate,
+              numberOfChannels: Math.min(audioSettings.channelCount || 2, 2),
+              bitrate: 128000,
+            }
+          };
+
+          ws.send(JSON.stringify(config));
+          log('Sent config to server', 'info');
+        };
+
+        ws.onmessage = (event) => {
+          const message = JSON.parse(event.data);
+
+          if (message.type === 'connected') {
+            log('Server acknowledged connection', 'success');
+          } else if (message.type === 'config-received') {
+            log('Server received config', 'success');
+          } else if (message.type === 'recording-started') {
+            log('Server started recording: ' + message.outputPath, 'success');
+            updateServerStatus('Recording...', 'recording');
+            startRecordingBtn.disabled = true;
+            stopRecordingBtn.disabled = false;
+          } else if (message.type === 'recording-stopped') {
+            log('Server stopped recording', 'success');
+            log(`Saved: ${message.stats.outputPath}`, 'info');
+            log(`Video frames: ${message.stats.videoFrames}, Audio frames: ${message.stats.audioFrames}`, 'info');
+            updateServerStatus('Recording saved', 'success');
+            startRecordingBtn.disabled = false;
+            stopRecordingBtn.disabled = true;
+          } else if (message.type === 'error') {
+            log('Server error: ' + message.message, 'error');
+          }
+        };
+
+        ws.onerror = (error) => {
+          log('WebSocket error', 'error');
+          updateServerStatus('Connection error', 'error');
+        };
+
+        ws.onclose = () => {
+          log('Disconnected from server', 'info');
+          updateServerStatus('Disconnected', 'error');
+          connectBtn.disabled = false;
+          startStreamBtn.disabled = true;
+          stopStreamBtn.disabled = true;
+          startRecordingBtn.disabled = true;
+          stopRecordingBtn.disabled = true;
+        };
+
+      } catch (error) {
+        updatePublisherStatus('Connection failed', 'error');
+        log('Error: ' + error.message, 'error');
+      }
+    }
+
+    async function startStreaming() {
+      try {
+        updatePublisherStatus('Starting encoders...', 'info');
+
         const videoSettings = videoTrack.getSettings();
         const audioSettings = audioTrack.getSettings();
         const sampleRate = await getSampleRate(audioTrack);
@@ -326,184 +433,159 @@
         const bitrate = getBitrate(videoSettings.width, videoSettings.height, 30, 'good');
         const codecString = getCodecString(codec, videoSettings.width, videoSettings.height, bitrate);
 
-        const videoConfig = {
+        // Create video encoder
+        let frameIndex = 0;
+        videoEncoder = new VideoEncoder({
+          output: (chunk, meta) => {
+
+
+            console.log("Chunk", chunk)
+
+            if (streaming && ws && ws.readyState === WebSocket.OPEN) {
+              const isKeyframe = chunk.type === 'key';
+              const buffer = encodeFrame(0, chunk, isKeyframe);
+              ws.send(buffer);
+              videoFrameCount++;
+            }
+          },
+          error: (e) => {
+            log('Video encoder error: ' + e.message, 'error');
+          }
+        });
+
+        videoEncoder.configure({
           codec: codecString,
           width: videoSettings.width,
           height: videoSettings.height,
           bitrate: Math.round(bitrate),
           framerate: 30,
-        };
+        });
 
-        const audioConfig = {
+        // Create audio encoder
+        audioEncoder = new AudioEncoder({
+          output: (chunk) => {
+            if (streaming && ws && ws.readyState === WebSocket.OPEN) {
+              const buffer = encodeFrame(1, chunk, false);
+              ws.send(buffer);
+              audioFrameCount++;
+            }
+          },
+          error: (e) => {
+            log('Audio encoder error: ' + e.message, 'error');
+          }
+        });
+
+        audioEncoder.configure({
           codec: 'opus',
           sampleRate: sampleRate,
           numberOfChannels: Math.min(audioSettings.channelCount || 2, 2),
           bitrate: 128000,
-        };
+        });
 
-        // Get description
-        const description = await MoqPublisher.getDescription(videoTrack, videoConfig);
+        // Start processing video frames
+        videoProcessor = new MediaStreamTrackProcessor({ track: videoTrack });
+        const videoReader = videoProcessor.readable.getReader();
 
-        const catalogData = {
-          video: {
-            renditions: {
-              video0: {
-                codec: codecString,
-                codedWidth: videoSettings.width,
-                codedHeight: videoSettings.height,
-                description
-              }
-            },
-            priority: 1
-          },
-          audio: {
-            renditions: {
-              audio0: audioConfig
-            },
-            priority: 2
-          }
-        };
-
-        // Handle catalog requests
         (async () => {
-          while (broadcast) {
-            const trackRequest = await broadcast.requested();
-            const requestedTrack = trackRequest.track;
+          while (streaming) {
 
-            if (requestedTrack.name === 'catalog.json') {
-              const catalogJson = JSON.stringify(catalogData);
-              const group = requestedTrack.appendGroup();
-              group.writeString(catalogJson);
-              group.close();
-              log('Sent catalog', 'success');
+            console.log("Reading")
+            const { done, value: frame } = await videoReader.read();
+            if (done) break;
+
+            if (videoEncoder.encodeQueueSize < 5) {
+              videoEncoder.encode(frame, { keyFrame: frameIndex % 60 === 0 });
+              frameIndex++;
             }
+            frame.close();
           }
         })();
 
-        // Start MoQ publisher
-        publisher = new MoqPublisher(videoTrack, audioTrack, broadcast, videoConfig, audioConfig);
-        await publisher.start();
+        // Start processing audio frames
+        audioProcessor = new MediaStreamTrackProcessor({ track: audioTrack });
+        const audioReader = audioProcessor.readable.getReader();
 
-        updatePublisherStatus('Publishing to relay', 'success');
-        log('Publisher started', 'success');
+        (async () => {
+          while (streaming) {
+            const { done, value: audioData } = await audioReader.read();
+            if (done) break;
 
-        startPublishBtn.disabled = true;
-        stopPublishBtn.disabled = false;
+            if (audioEncoder.encodeQueueSize < 5) {
+              audioEncoder.encode(audioData);
+            }
+            audioData.close();
+          }
+        })();
+
+        streaming = true;
+        startTime = Date.now();
+        videoFrameCount = 0;
+        audioFrameCount = 0;
+
+        statsInterval = setInterval(updateStats, 100);
+
+        updatePublisherStatus('Streaming to server', 'success');
+        log('Started streaming', 'success');
+
+        startStreamBtn.disabled = true;
+        stopStreamBtn.disabled = false;
         startRecordingBtn.disabled = false;
+
       } catch (error) {
-        updatePublisherStatus('Connection failed', 'error');
-        log('Error: ' + error.message, 'error');
+        updatePublisherStatus('Failed to start streaming', 'error');
+        log('Streaming error: ' + error.message, 'error');
       }
     }
 
-    async function stopPublishing() {
-      try {
-        if (publisher) {
-          publisher.stop();
-          publisher = null;
-        }
+    async function stopStreaming() {
+      streaming = false;
 
-        if (moqConnection) {
-          await moqConnection.close();
-          moqConnection = null;
-        }
-
-        broadcast = null;
-
-        updatePublisherStatus('Stopped publishing', 'info');
-        log('Publishing stopped', 'info');
-
-        startPublishBtn.disabled = false;
-        stopPublishBtn.disabled = true;
-        startRecordingBtn.disabled = true;
-      } catch (error) {
-        log('Stop error: ' + error.message, 'error');
+      if (statsInterval) {
+        clearInterval(statsInterval);
+        statsInterval = null;
       }
+
+      if (videoEncoder) {
+        await videoEncoder.flush();
+        videoEncoder.close();
+        videoEncoder = null;
+      }
+
+      if (audioEncoder) {
+        await audioEncoder.flush();
+        audioEncoder.close();
+        audioEncoder = null;
+      }
+
+      updatePublisherStatus('Stopped streaming', 'info');
+      log('Stopped streaming', 'info');
+
+      startStreamBtn.disabled = false;
+      stopStreamBtn.disabled = true;
+      startRecordingBtn.disabled = true;
     }
 
     async function startServerRecording() {
-      try {
-        const broadcastName = broadcastNameInput.value;
-
-        updateServerStatus('Starting server recording...', 'info');
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'start-recording' }));
         log('Requesting server to start recording...', 'info');
-
-        const response = await fetch('http://localhost:3000/api/start-recording', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ broadcastName })
-        });
-
-        const data = await response.json();
-
-        if (data.success) {
-          updateServerStatus('Server is recording', 'recording');
-          log(`Server recording started: ${data.outputPath}`, 'success');
-          startRecordingBtn.disabled = true;
-          stopRecordingBtn.disabled = false;
-        } else {
-          throw new Error(data.error);
-        }
-      } catch (error) {
-        updateServerStatus('Failed to start recording', 'error');
-        log('Server error: ' + error.message, 'error');
       }
     }
 
     async function stopServerRecording() {
-      try {
-        updateServerStatus('Stopping server recording...', 'info');
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'stop-recording' }));
         log('Requesting server to stop recording...', 'info');
-
-        const response = await fetch('http://localhost:3000/api/stop-recording', {
-          method: 'POST'
-        });
-
-        const data = await response.json();
-
-        if (data.success) {
-          updateServerStatus('Recording saved', 'success');
-          log(`Recording saved: ${data.outputPath}`, 'success');
-          startRecordingBtn.disabled = false;
-          stopRecordingBtn.disabled = true;
-        } else {
-          throw new Error(data.error);
-        }
-      } catch (error) {
-        updateServerStatus('Failed to stop recording', 'error');
-        log('Server error: ' + error.message, 'error');
-      }
-    }
-
-    async function checkServerStatus() {
-      try {
-        const response = await fetch('http://localhost:3000/api/status');
-        const data = await response.json();
-
-        if (data.recording) {
-          const duration = Math.floor(data.duration / 1000);
-          updateServerStatus(`Recording (${duration}s)`, 'recording');
-          log(`Server status: Recording for ${duration}s`, 'info');
-        } else {
-          updateServerStatus('Server ready (not recording)', 'success');
-          log('Server status: Ready', 'info');
-        }
-      } catch (error) {
-        updateServerStatus('Cannot connect to server', 'error');
-        log('Server check error: ' + error.message, 'error');
       }
     }
 
     // Event listeners
     startWebcamBtn.addEventListener('click', startWebcam);
-    startPublishBtn.addEventListener('click', startPublishing);
-    stopPublishBtn.addEventListener('click', stopPublishing);
+    connectBtn.addEventListener('click', connectToServer);
+    startStreamBtn.addEventListener('click', startStreaming);
+    stopStreamBtn.addEventListener('click', stopStreaming);
     startRecordingBtn.addEventListener('click', startServerRecording);
     stopRecordingBtn.addEventListener('click', stopServerRecording);
-    checkStatusBtn.addEventListener('click', checkServerStatus);
-
-    // Check server status on load
-    checkServerStatus();
   </script>
 </body>
 </html>

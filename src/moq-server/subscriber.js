@@ -1,7 +1,6 @@
 import express from 'express';
-import cors from 'cors';
-import * as Moq from '@moq/lite';
-import { Output } from 'mediabunny';
+import { WebSocketServer } from 'ws';
+import { Output, EncodedPacket, EncodedVideoPacketSource,EncodedAudioPacketSource, BufferTarget, Mp4OutputFormat } from 'mediabunny';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import fs from 'fs';
@@ -10,12 +9,10 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 const app = express();
-app.use(cors());
 app.use(express.json());
 app.use(express.static(join(__dirname, 'public')));
 
 const PORT = 3000;
-const RELAY_URL = 'http://localhost:4443';
 const RECORDINGS_DIR = join(__dirname, 'recordings');
 
 // Ensure recordings directory exists
@@ -24,155 +21,86 @@ if (!fs.existsSync(RECORDINGS_DIR)) {
 }
 
 // State
-let moqConnection = null;
 let currentRecording = null;
+let recordingClient = null;
 
 /**
- * Parse Hang protocol video frame
- * Format: [timestamp (8 bytes)] [data]
+ * Parse binary frame format: [type (1 byte)][timestamp (8 bytes)][data]
+ * type: 0 = video, 1 = audio, 2 = config
  */
-function parseVideoFrame(buffer, isKeyframe) {
+function parseFrame(buffer) {
   const view = new DataView(buffer.buffer, buffer.byteOffset);
-  const timestamp = Number(view.getBigUint64(0, true));
-  const type = isKeyframe ? 'key' : 'delta';
-  const data = buffer.slice(8);
 
-  return { timestamp, type, data };
+  const type = view.getUint8(0);
+
+  if (type === 2) {
+    // Config message: [type][config JSON]
+    const configJson = buffer.slice(1).toString();
+    return { type: 'config', config: JSON.parse(configJson) };
+  }
+
+  const timestamp = Number(view.getBigUint64(1, true));
+  const keyframe = view.getUint8(9) === 1;
+  const data = buffer.slice(10);
+
+  return {
+    type: type === 0 ? 'video' : 'audio',
+    timestamp,
+    keyframe,
+    data
+  };
 }
 
 /**
- * Parse Hang protocol audio frame
- * Format: [timestamp (8 bytes)] [data]
+ * Start recording from WebSocket stream
  */
-function parseAudioFrame(buffer) {
-  const view = new DataView(buffer.buffer, buffer.byteOffset);
-  const timestamp = Number(view.getBigUint64(0, true));
-  const data = buffer.slice(8);
-
-  return { timestamp, data };
-}
-
-/**
- * Subscribe to MoQ broadcast and save to file
- */
-async function startRecording(broadcastName) {
+async function startRecording(ws, config) {
   if (currentRecording) {
     throw new Error('Already recording');
   }
 
-  console.log(`Connecting to relay: ${RELAY_URL}`);
-  moqConnection = await Moq.Connection.connect(new URL(RELAY_URL));
-
-  console.log(`Consuming broadcast: ${broadcastName}`);
-  const broadcast = moqConnection.consume(broadcastName);
-
-  // Get catalog
-  console.log('Waiting for catalog...');
-  const catalogTrack = broadcast.subscribe('catalog.json');
-
-  let catalog;
-  for (;;) {
-    const catalogGroup = await catalogTrack.nextGroup();
-    if (catalogGroup) {
-      const catalogJson = await catalogGroup.readString();
-      catalog = JSON.parse(catalogJson);
-      console.log('Received catalog:', catalog);
-      break;
-    }
-  }
-
-  // Subscribe to video and audio tracks
-  const videoTrack = await broadcast.subscribe('video');
-  const audioTrack = await broadcast.subscribe('audio');
-  console.log('Subscribed to video and audio tracks');
-
-  // Create output file with MediaBunny
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
   const outputPath = join(RECORDINGS_DIR, `recording-${timestamp}.mp4`);
 
-  const videoRendition = Object.values(catalog.video.renditions)[0];
-  const audioRendition = Object.values(catalog.audio.renditions)[0];
+  console.log('Creating output file:', outputPath);
+  console.log('Video config:', config.video);
+  console.log('Audio config:', config.audio);
 
-  const output = Output.create(outputPath, {
-    video: {
-      codec: videoRendition.codec.startsWith('avc') ? 'h264' : 'vp9',
-      width: videoRendition.codedWidth,
-      height: videoRendition.codedHeight,
-    },
-    audio: {
-      codec: audioRendition.codec.startsWith('opus') ? 'opus' : 'aac',
-      sampleRate: audioRendition.sampleRate,
-      channels: audioRendition.numberOfChannels,
-    }
+  // Create output using MediaBunny API
+  const output = new Output({
+    format: new Mp4OutputFormat(),
+    target: new BufferTarget(),
   });
 
+  // Create video source
+  const videoCodec = config.video.codec.startsWith('avc') ? 'avc' :
+                     config.video.codec.startsWith('vp9') ? 'vp9' : 'av1';
+  const videoSource = new EncodedVideoPacketSource(videoCodec);
+  output.addVideoTrack(videoSource);
+
+  // Create audio source
+  const audioCodec = config.audio.codec.startsWith('opus') ? 'opus' : 'aac';
+  const audioSource = new EncodedAudioPacketSource(audioCodec );
+  output.addAudioTrack(audioSource);
+
+  // Start output
+  await output.start();
+
   currentRecording = {
-    broadcast,
     output,
+    videoSource,
+    audioSource,
     outputPath,
-    videoTrack,
-    audioTrack,
-    startTime: Date.now()
+    startTime: Date.now(),
+    videoFrames: 0,
+    audioFrames: 0
   };
 
-  // Start reading video frames
-  (async () => {
-    try {
-      while (currentRecording) {
-        const group = await videoTrack.nextGroup();
-        if (!group) break;
-
-        let isKeyframe = true;
-
-        for (;;) {
-          const frameData = await group.readFrame();
-          if (!frameData) break;
-
-          const frame = parseVideoFrame(frameData, isKeyframe);
-
-          // Write to output using MediaBunny
-          await output.video({
-            data: frame.data,
-            timestamp: frame.timestamp,
-            keyframe: isKeyframe
-          });
-
-          isKeyframe = false;
-        }
-      }
-    } catch (error) {
-      if (currentRecording) {
-        console.error('Video read error:', error);
-      }
-    }
-  })();
-
-  // Start reading audio frames
-  (async () => {
-    try {
-      while (currentRecording) {
-        const group = await audioTrack.nextGroup();
-        if (!group) break;
-
-        const frameData = await group.readFrame();
-        if (!frameData) continue;
-
-        const frame = parseAudioFrame(frameData);
-
-        // Write to output using MediaBunny
-        await output.audio({
-          data: frame.data,
-          timestamp: frame.timestamp
-        });
-      }
-    } catch (error) {
-      if (currentRecording) {
-        console.error('Audio read error:', error);
-      }
-    }
-  })();
+  recordingClient = ws;
 
   console.log(`Recording started: ${outputPath}`);
+  ws.send(JSON.stringify({ type: 'recording-started', outputPath }));
+
   return { outputPath };
 }
 
@@ -185,60 +113,156 @@ async function stopRecording() {
   }
 
   console.log('Stopping recording...');
+  console.log(`Recorded ${currentRecording.videoFrames} video frames, ${currentRecording.audioFrames} audio frames`);
+
   const { output, outputPath } = currentRecording;
 
   // Finalize the output file
   await output.finalize();
 
-  // Close MoQ connection
-  if (moqConnection) {
-    await moqConnection.close();
-    moqConnection = null;
-  }
+  const stats = {
+    outputPath,
+    duration: Date.now() - currentRecording.startTime,
+    videoFrames: currentRecording.videoFrames,
+    audioFrames: currentRecording.audioFrames
+  };
 
   currentRecording = null;
-  console.log(`Recording saved: ${outputPath}`);
+  recordingClient = null;
 
-  return { outputPath };
+  console.log(`Recording saved: ${outputPath}`);
+  return stats;
 }
 
-// API endpoints
-app.post('/api/start-recording', async (req, res) => {
-  try {
-    const { broadcastName } = req.body;
+/**
+ * Handle incoming frame data
+ */
+async function handleFrame(frame) {
 
-    if (!broadcastName) {
-      return res.status(400).json({ error: 'broadcastName is required' });
+
+
+
+  if (!currentRecording) {
+    return; // Not recording, ignore frame
+  }
+
+  try {
+    if (frame.type === 'video') {
+      // Create EncodedVideoChunk
+      const chunk = new EncodedVideoChunk({
+        type: frame.keyframe ? 'key' : 'delta',
+        timestamp: frame.timestamp,
+        data: frame.data
+      });
+
+      // Add to video source
+      const packet = EncodedPacket.fromEncodedVideoChunk(chunk);
+      currentRecording.videoSource.add(packet);
+      currentRecording.videoFrames++;
+    } else if (frame.type === 'audio') {
+      // Create EncodedAudioChunk
+      const chunk = new EncodedAudioChunk({
+        type: 'key',
+        timestamp: frame.timestamp,
+        data: frame.data
+      });
+
+      // Add to audio source
+      const packet = EncodedPacket.fromEncodedAudioChunk(chunk);
+      currentRecording.audioSource.add(packet);
+      currentRecording.audioFrames++;
     }
-
-    const result = await startRecording(broadcastName);
-    res.json({ success: true, ...result });
   } catch (error) {
-    console.error('Start recording error:', error);
-    res.status(500).json({ error: error.message });
+    console.error('Error writing frame:', error);
   }
+}
+
+// Create WebSocket server
+const wss = new WebSocketServer({ noServer: true });
+
+wss.on('connection', (ws) => {
+  console.log('Client connected');
+
+  let config = null;
+
+  ws.on('message', async (data) => {
+
+
+    console.log("Websocket message")
+    try {
+      // Check if it's JSON (control message)
+      if (data[0] === 0x7B) { // '{' character
+        const message = JSON.parse(data.toString());
+
+        if (message.type === 'config') {
+          config = message;
+          console.log('Received config:', config);
+          ws.send(JSON.stringify({ type: 'config-received' }));
+        } else if (message.type === 'start-recording') {
+          if (!config) {
+            ws.send(JSON.stringify({ type: 'error', message: 'Config not received' }));
+            return;
+          }
+          startRecording(ws, config);
+        } else if (message.type === 'stop-recording') {
+          const stats = await stopRecording();
+          ws.send(JSON.stringify({ type: 'recording-stopped', stats }));
+        }
+      } else {
+
+
+    console.log("Data received");
+        // Binary frame data
+        const frame = parseFrame(data);
+        if (frame.type === 'config') {
+          config = frame.config;
+          console.log('Received config:', config);
+          ws.send(JSON.stringify({ type: 'config-received' }));
+        } else {
+          await handleFrame(frame);
+        }
+      }
+    } catch (error) {
+      console.error('Error handling message:', error);
+      ws.send(JSON.stringify({ type: 'error', message: error.message }));
+    }
+  });
+
+  ws.on('close', async () => {
+    console.log('Client disconnected');
+    if (currentRecording && recordingClient === ws) {
+      console.log('Client disconnected during recording, finalizing...');
+      await stopRecording();
+    }
+  });
+
+  ws.on('error', (error) => {
+    console.error('WebSocket error:', error);
+  });
+
+  ws.send(JSON.stringify({ type: 'connected' }));
 });
 
-app.post('/api/stop-recording', async (req, res) => {
-  try {
-    const result = await stopRecording();
-    res.json({ success: true, ...result });
-  } catch (error) {
-    console.error('Stop recording error:', error);
-    res.status(500).json({ error: error.message });
-  }
+// Upgrade HTTP server to WebSocket
+const server = app.listen(PORT, () => {
+  console.log(`Server running on http://localhost:${PORT}`);
+  console.log(`WebSocket available at ws://localhost:${PORT}`);
+  console.log(`Recordings will be saved to: ${RECORDINGS_DIR}`);
 });
 
+server.on('upgrade', (request, socket, head) => {
+  wss.handleUpgrade(request, socket, head, (ws) => {
+    wss.emit('connection', ws, request);
+  });
+});
+
+// API endpoints for status
 app.get('/api/status', (req, res) => {
   res.json({
     recording: currentRecording !== null,
     outputPath: currentRecording?.outputPath || null,
-    duration: currentRecording ? Date.now() - currentRecording.startTime : 0
+    duration: currentRecording ? Date.now() - currentRecording.startTime : 0,
+    videoFrames: currentRecording?.videoFrames || 0,
+    audioFrames: currentRecording?.audioFrames || 0
   });
-});
-
-app.listen(PORT, () => {
-  console.log(`MoQ Subscriber server running on http://localhost:${PORT}`);
-  console.log(`Relay URL: ${RELAY_URL}`);
-  console.log(`Recordings will be saved to: ${RECORDINGS_DIR}`);
 });

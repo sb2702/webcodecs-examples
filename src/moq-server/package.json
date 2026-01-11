@@ -12,8 +12,10 @@
   "license": "MIT",
   "dependencies": {
     "@moq/lite": "^0.1.0",
-    "mediabunny": "^1.27.4",
+    "@yomo/webtransport-polyfill": "^1.0.18",
+    "cors": "^2.8.5",
     "express": "^4.18.2",
-    "cors": "^2.8.5"
+    "mediabunny": "^1.27.4",
+    "ws": "^8.19.0"
   }
 }
