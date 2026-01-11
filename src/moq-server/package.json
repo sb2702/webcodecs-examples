@@ -1,16 +1,19 @@
 {
   "name": "moq-server",
   "version": "0.0.1",
-  "description": "Test server for demoing server-side moq integration",
+  "description": "Server-side MoQ integration demos",
   "main": "index.js",
   "type": "module",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "subscriber": "node subscriber.js",
+    "publisher": "node publisher.js"
   },
   "author": "Sam Bhattacharyya",
   "license": "MIT",
   "dependencies": {
     "@moq/lite": "^0.1.0",
-    "mediabunny": "^1.27.4"
+    "mediabunny": "^1.27.4",
+    "express": "^4.18.2",
+    "cors": "^2.8.5"
   }
 }
