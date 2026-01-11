@@ -291,19 +291,28 @@
     }
 
     /**
-     * Encode frame in binary format: [type (1 byte)][timestamp (8 bytes)][keyframe (1 byte)][data]
+     * Encode frame in binary format:
+     * [type (1 byte)][timestamp (8 bytes)][duration (8 bytes)][keyframe (1 byte)]
+     * [metaLength (4 bytes)][meta (raw bytes)][data]
      */
-    function encodeFrame(type, chunk, isKeyframe = false) {
+    function encodeFrame(type, chunk, isKeyframe = false, meta = null) {
       const chunkData = new Uint8Array(chunk.byteLength);
       chunk.copyTo(chunkData);
 
-      const buffer = new Uint8Array(10 + chunkData.byteLength);
+      // Meta is a Uint8Array (description from encoder)
+      const metaBytes = meta ? new Uint8Array(meta) : new Uint8Array(0);
+
+      const buffer = new Uint8Array(22 + metaBytes.byteLength + chunkData.byteLength);
       const view = new DataView(buffer.buffer);
 
       view.setUint8(0, type); // 0 = video, 1 = audio
       view.setBigUint64(1, BigInt(chunk.timestamp), true);
-      view.setUint8(9, isKeyframe ? 1 : 0);
-      buffer.set(chunkData, 10);
+      view.setBigUint64(9, BigInt(chunk.duration || 0), true);
+      view.setUint8(17, isKeyframe ? 1 : 0);
+      view.setUint32(18, metaBytes.byteLength, true);
+
+      buffer.set(metaBytes, 22);
+      buffer.set(chunkData, 22 + metaBytes.byteLength);
 
       return buffer;
     }
@@ -351,7 +360,7 @@
           const audioSettings = audioTrack.getSettings();
           const sampleRate = await getSampleRate(audioTrack);
 
-          const codec = 'avc';
+          const codec = 'vp9';
           const bitrate = getBitrate(videoSettings.width, videoSettings.height, 30, 'good');
           const codecString = getCodecString(codec, videoSettings.width, videoSettings.height, bitrate);
 
@@ -463,8 +472,9 @@
         super({
           start(controller) {
             encoder = new AudioEncoder({
-              output: (chunk) => {
-                controller.enqueue(chunk);
+              output: (chunk, meta) => {
+
+                controller.enqueue({ chunk, meta });
               },
               error: (e) => {
                 log('Audio encoder error: ' + e.message, 'error');
@@ -493,9 +503,10 @@
       return new WritableStream({
         write(data) {
           if (ws && ws.readyState === WebSocket.OPEN) {
-            const chunk = type === 'video' ? data.chunk : data;
+            const chunk = type === 'video' ? data.chunk : data.chunk;
             const isKeyframe = type === 'video' ? data.isKeyframe : false;
-            const buffer = encodeFrame(type === 'video' ? 0 : 1, chunk, isKeyframe);
+            const meta = data.meta || null;
+            const buffer = encodeFrame(type === 'video' ? 0 : 1, chunk, isKeyframe, meta);
             ws.send(buffer);
 
             if (type === 'video') {
@@ -518,7 +529,7 @@
         const audioSettings = audioTrack.getSettings();
         const sampleRate = await getSampleRate(audioTrack);
 
-        const codec = 'avc';
+        const codec = 'vp9';
         const bitrate = getBitrate(videoSettings.width, videoSettings.height, 30, 'good');
         const codecString = getCodecString(codec, videoSettings.width, videoSettings.height, bitrate);
 

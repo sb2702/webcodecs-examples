@@ -1,6 +1,6 @@
 import express from 'express';
 import { WebSocketServer } from 'ws';
-import { Output, EncodedPacket, EncodedVideoPacketSource,EncodedAudioPacketSource, BufferTarget, Mp4OutputFormat } from 'mediabunny';
+import { Output, EncodedPacket, EncodedVideoPacketSource,EncodedAudioPacketSource, BufferTarget, WebMOutputFormat } from 'mediabunny';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import fs from 'fs';
@@ -25,7 +25,9 @@ let currentRecording = null;
 let recordingClient = null;
 
 /**
- * Parse binary frame format: [type (1 byte)][timestamp (8 bytes)][data]
+ * Parse binary frame format:
+ * [type (1 byte)][timestamp (8 bytes)][duration (8 bytes)][keyframe (1 byte)]
+ * [metaLength (4 bytes)][meta (raw bytes)][data]
  * type: 0 = video, 1 = audio, 2 = config
  */
 function parseFrame(buffer) {
@@ -40,13 +42,27 @@ function parseFrame(buffer) {
   }
 
   const timestamp = Number(view.getBigUint64(1, true));
-  const keyframe = view.getUint8(9) === 1;
-  const data = buffer.slice(10);
+  const duration = Number(view.getBigUint64(9, true));
+  const keyframe = view.getUint8(17) === 1;
+  const metaLength = view.getUint32(18, true);
+
+  let description = undefined;
+  let dataOffset = 22;
+
+  if (metaLength > 0) {
+    // Meta is raw bytes (description)
+    description = buffer.slice(22, 22 + metaLength);
+    dataOffset = 22 + metaLength;
+  }
+
+  const data = buffer.slice(dataOffset);
 
   return {
     type: type === 0 ? 'video' : 'audio',
     timestamp,
+    duration,
     keyframe,
+    description,
     data
   };
 }
@@ -68,7 +84,7 @@ async function startRecording(ws, config) {
 
   // Create output using MediaBunny API
   const output = new Output({
-    format: new Mp4OutputFormat(),
+    format: new WebMOutputFormat(),
     target: new BufferTarget(),
   });
 
@@ -137,28 +153,48 @@ async function stopRecording() {
 /**
  * Handle incoming frame data
  */
+
+
+let startedYet = false;
+
+
 async function handleFrame(frame) {
-
-
-
-
   if (!currentRecording) {
     return; // Not recording, ignore frame
   }
 
+  console.log("Frame description", frame.description)
+
+  if(frame.type === 'video' && frame.keyframe){
+    startedYet = true;
+  }
+  if(!startedYet) return;
+
   try {
     if (frame.type === 'video') {
+      const packetType = frame.keyframe ? 'key' : 'delta';
 
-
-      // Add to video source
+      // Add to video source (description is already Uint8Array or undefined)
       const packet = new EncodedPacket(frame.data, packetType, frame.timestamp, frame.duration);
-      currentRecording.videoSource.add(packet);
+      currentRecording.videoSource.add(packet, {
+          decoderConfig: {
+
+            codec:  "vp09.00.31.08",
+            codedHeight: 720,
+            codedWidth: 1280
+          }
+      });
       currentRecording.videoFrames++;
     } else if (frame.type === 'audio') {
-
-      // Add to audio source
+      // Add to audio source (description is already Uint8Array or undefined)
       const packet = new EncodedPacket(frame.data, 'key', frame.timestamp, frame.duration);
-      currentRecording.audioSource.add(packet);
+      currentRecording.audioSource.add(packet, {
+        decoderConfig: {
+                codec: "opus",
+        numberOfChannels: 1,
+        sampleRate: 48000
+        }
+      });
       currentRecording.audioFrames++;
     }
   } catch (error) {
