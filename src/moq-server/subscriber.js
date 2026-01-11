@@ -59,14 +59,14 @@ function parseFrame(buffer) {
     const meta = JSON.parse(configJson);
     decoderConfig = meta.decoderConfig || null;
     offset += configLength;
+  }
 
-    // Parse description
-    const descLength = view.getUint32(offset, true); offset += 4;
-    if (descLength > 0 && decoderConfig) {
-      const description = buffer.slice(offset, offset + descLength);
-      decoderConfig.description = description;
-      offset += descLength;
-    }
+  // Parse description (always present in protocol, even if 0 length)
+  const descLength = view.getUint32(offset, true); offset += 4;
+  if (descLength > 0 && decoderConfig) {
+    const description = buffer.slice(offset, offset + descLength);
+    decoderConfig.description = description;
+    offset += descLength;
   }
 
   const data = buffer.slice(offset);
@@ -117,6 +117,10 @@ async function startRecording(ws, config) {
 
   // Start output
   await output.start();
+
+  // Reset config flags for new recording
+  addedAudioConfig = false;
+  addedVideoConfig = false;
 
   currentRecording = {
     output,
@@ -246,6 +250,7 @@ async function handleFrame(frame) {
 
       if(!addedAudioConfig){
         currentRecording.audioSource.add(packet, { decoderConfig: audioDecoderConfig } );
+        addedAudioConfig = true;
       } else{
         currentRecording.audioSource.add(packet);
       }
