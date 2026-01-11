@@ -1,6 +1,6 @@
 import express from 'express';
 import { WebSocketServer } from 'ws';
-import { Output, EncodedPacket, EncodedVideoPacketSource,EncodedAudioPacketSource, FilePathTarget, Mp4OutputFormat, WebMOutputFormat } from 'mediabunny';
+import { Output, EncodedPacket, EncodedVideoPacketSource,EncodedAudioPacketSource, FilePathTarget, BufferTarget, Mp4OutputFormat, WebMOutputFormat } from 'mediabunny';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import fs from 'fs';
@@ -98,19 +98,21 @@ async function startRecording(ws, config) {
 
   // Create output using MediaBunny API
   const output = new Output({
-    format: new Mp4OutputFormat(),
-    target: new FilePathTarget(outputPath),
+    format: new Mp4OutputFormat({
+      fastStart: 'in-memory'
+    }),
+    target: new BufferTarget(),
   });
 
   // Create video source
   const videoCodec = config.video.codec.startsWith('avc') ? 'avc' :
                      config.video.codec.startsWith('vp9') ? 'vp9' : 'av1';
-  const videoSource = new EncodedVideoPacketSource(videoCodec);
+  const videoSource = new EncodedVideoPacketSource('avc');
   output.addVideoTrack(videoSource);
 
   // Create audio source
   const audioCodec = config.audio.codec.startsWith('opus') ? 'opus' : 'aac';
-  const audioSource = new EncodedAudioPacketSource(audioCodec );
+  const audioSource = new EncodedAudioPacketSource('opus' );
   output.addAudioTrack(audioSource);
 
   // Start output
@@ -155,6 +157,16 @@ async function stopRecording() {
   // Finalize the output file
   await output.finalize();
 
+  console.log(output.target.buffer)
+
+  const buffer = Buffer.from(output.target.buffer);
+
+// Specify the file path
+const filePath = 'output.mp4';
+
+// Write the buffer to the file asynchronously
+fs.writeFileSync(filePath, buffer);
+
   const stats = {
 
 
@@ -175,6 +187,7 @@ let addedAudioConfig = false;
 let addedVideoConfig  = false;
 
 async function handleFrame(frame) {
+
   try {
     // Always cache decoderConfig (even when not recording)
     if (frame.type === 'video' && frame.decoderConfig) {
@@ -253,8 +266,6 @@ wss.on('connection', (ws) => {
   let config = null;
 
   ws.on('message', async (data) => {
-
-
     try {
       // Check if it's JSON (control message)
       if (data[0] === 0x7B) { // '{' character
@@ -269,22 +280,15 @@ wss.on('connection', (ws) => {
             ws.send(JSON.stringify({ type: 'error', message: 'Config not received' }));
             return;
           }
-          startRecording(ws, config);
+          await startRecording(ws, config);
         } else if (message.type === 'stop-recording') {
           const stats = await stopRecording();
           ws.send(JSON.stringify({ type: 'recording-stopped', stats }));
         }
       } else {
-
         // Binary frame data
         const frame = parseFrame(data);
-        if (frame.type === 'config') {
-          config = frame.config;
-          console.log('Received config:', config);
-          ws.send(JSON.stringify({ type: 'config-received' }));
-        } else {
-          await handleFrame(frame);
-        }
+        await handleFrame(frame);
       }
     } catch (error) {
       console.error('Error handling message:', error);

@@ -219,11 +219,6 @@
       <h3>💾 Server Recorder</h3>
       <div id="serverStatus" class="status">Not connected</div>
 
-      <div class="controls">
-        <button id="startRecordingBtn" disabled>Start Server Recording</button>
-        <button id="stopRecordingBtn" class="danger" disabled>Stop Server Recording</button>
-      </div>
-
       <div class="log" id="log"></div>
     </div>
   </div>
@@ -239,8 +234,6 @@
     const connectBtn = document.getElementById('connectBtn');
     const startStreamBtn = document.getElementById('startStreamBtn');
     const stopStreamBtn = document.getElementById('stopStreamBtn');
-    const startRecordingBtn = document.getElementById('startRecordingBtn');
-    const stopRecordingBtn = document.getElementById('stopRecordingBtn');
     const preview = document.getElementById('preview');
     const videoFrameCountEl = document.getElementById('videoFrameCount');
     const audioFrameCountEl = document.getElementById('audioFrameCount');
@@ -260,6 +253,8 @@
     let audioFrameCount = 0;
     let startTime = 0;
     let statsInterval = null;
+    let recordingStartedPromise = null;
+    let recordingStartedResolve = null;
 
     function log(message, type = 'info') {
       const entry = document.createElement('div');
@@ -373,7 +368,12 @@
           connectBtn.disabled = true;
           startStreamBtn.disabled = false;
 
-          // Send config
+          // Create promise that will resolve when recording starts
+          recordingStartedPromise = new Promise(resolve => {
+            recordingStartedResolve = resolve;
+          });
+
+          // Send config before streaming starts
           const videoSettings = videoTrack.getSettings();
           const audioSettings = audioTrack.getSettings();
           const sampleRate = await getSampleRate(audioTrack);
@@ -408,20 +408,14 @@
 
           if (message.type === 'connected') {
             log('Server acknowledged connection', 'success');
-          } else if (message.type === 'config-received') {
-            log('Server received config', 'success');
           } else if (message.type === 'recording-started') {
             log('Server started recording: ' + message.outputPath, 'success');
             updateServerStatus('Recording...', 'recording');
-            startRecordingBtn.disabled = true;
-            stopRecordingBtn.disabled = false;
           } else if (message.type === 'recording-stopped') {
             log('Server stopped recording', 'success');
             log(`Saved: ${message.stats.outputPath}`, 'info');
             log(`Video frames: ${message.stats.videoFrames}, Audio frames: ${message.stats.audioFrames}`, 'info');
             updateServerStatus('Recording saved', 'success');
-            startRecordingBtn.disabled = false;
-            stopRecordingBtn.disabled = true;
           } else if (message.type === 'error') {
             log('Server error: ' + message.message, 'error');
           }
@@ -438,8 +432,6 @@
           connectBtn.disabled = false;
           startStreamBtn.disabled = true;
           stopStreamBtn.disabled = true;
-          startRecordingBtn.disabled = true;
-          stopRecordingBtn.disabled = true;
         };
 
       } catch (error) {
@@ -552,6 +544,30 @@
 
     async function startStreaming() {
       try {
+        updatePublisherStatus('Starting recording...', 'info');
+
+        // Tell server to start recording and wait for confirmation
+        ws.send(JSON.stringify({ type: 'start-recording' }));
+
+        // Wait for recording-started message
+        await new Promise((resolve, reject) => {
+          const timeout = setTimeout(() => reject(new Error('Recording start timeout')), 5000);
+          const handler = (event) => {
+            const message = JSON.parse(event.data);
+            if (message.type === 'recording-started') {
+              clearTimeout(timeout);
+              ws.removeEventListener('message', handler);
+              resolve();
+            } else if (message.type === 'error') {
+              clearTimeout(timeout);
+              ws.removeEventListener('message', handler);
+              reject(new Error(message.message));
+            }
+          };
+          ws.addEventListener('message', handler);
+        });
+
+        log('Server recording started, beginning stream...', 'success');
         updatePublisherStatus('Starting encoders...', 'info');
 
         const videoSettings = videoTrack.getSettings();
@@ -617,7 +633,6 @@
 
         startStreamBtn.disabled = true;
         stopStreamBtn.disabled = false;
-        startRecordingBtn.disabled = false;
 
       } catch (error) {
         updatePublisherStatus('Failed to start streaming', 'error');
@@ -627,6 +642,12 @@
 
     async function stopStreaming() {
       streaming = false;
+
+      // Tell server to stop recording
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'stop-recording' }));
+        log('Requesting server to stop recording...', 'info');
+      }
 
       if (statsInterval) {
         clearInterval(statsInterval);
@@ -643,21 +664,6 @@
 
       startStreamBtn.disabled = false;
       stopStreamBtn.disabled = true;
-      startRecordingBtn.disabled = true;
-    }
-
-    async function startServerRecording() {
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'start-recording' }));
-        log('Requesting server to start recording...', 'info');
-      }
-    }
-
-    async function stopServerRecording() {
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'stop-recording' }));
-        log('Requesting server to stop recording...', 'info');
-      }
     }
 
     // Event listeners
@@ -665,8 +671,6 @@
     connectBtn.addEventListener('click', connectToServer);
     startStreamBtn.addEventListener('click', startStreaming);
     stopStreamBtn.addEventListener('click', stopStreaming);
-    startRecordingBtn.addEventListener('click', startServerRecording);
-    stopRecordingBtn.addEventListener('click', stopServerRecording);
   </script>
 </body>
 </html>
