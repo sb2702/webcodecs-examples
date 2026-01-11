@@ -23,11 +23,13 @@ if (!fs.existsSync(RECORDINGS_DIR)) {
 // State
 let currentRecording = null;
 let recordingClient = null;
+let videoDecoderConfig = null;
+let audioDecoderConfig = null;
 
 /**
  * Parse binary frame format:
  * [type (1 byte)][timestamp (8 bytes)][duration (8 bytes)][keyframe (1 byte)]
- * [metaLength (4 bytes)][meta (raw bytes)][data]
+ * [configLength (4 bytes)][config JSON][descLength (4 bytes)][description][data]
  * type: 0 = video, 1 = audio, 2 = config
  */
 function parseFrame(buffer) {
@@ -41,28 +43,40 @@ function parseFrame(buffer) {
     return { type: 'config', config: JSON.parse(configJson) };
   }
 
-  const timestamp = Number(view.getBigUint64(1, true));
-  const duration = Number(view.getBigUint64(9, true));
-  const keyframe = view.getUint8(17) === 1;
-  const metaLength = view.getUint32(18, true);
+  let offset = 0;
+  offset += 1; // type
+  const timestamp = Number(view.getBigUint64(offset, true)); offset += 8;
+  const duration = Number(view.getBigUint64(offset, true)); offset += 8;
+  const keyframe = view.getUint8(offset) === 1; offset += 1;
+  const configLength = view.getUint32(offset, true); offset += 4;
 
-  let description = undefined;
-  let dataOffset = 22;
+  let decoderConfig = null;
 
-  if (metaLength > 0) {
-    // Meta is raw bytes (description)
-    description = buffer.slice(22, 22 + metaLength);
-    dataOffset = 22 + metaLength;
+  if (configLength > 0) {
+    // Parse config JSON
+    const configBytes = buffer.slice(offset, offset + configLength);
+    const configJson = new TextDecoder().decode(configBytes);
+    const meta = JSON.parse(configJson);
+    decoderConfig = meta.decoderConfig || null;
+    offset += configLength;
+
+    // Parse description
+    const descLength = view.getUint32(offset, true); offset += 4;
+    if (descLength > 0 && decoderConfig) {
+      const description = buffer.slice(offset, offset + descLength);
+      decoderConfig.description = description;
+      offset += descLength;
+    }
   }
 
-  const data = buffer.slice(dataOffset);
+  const data = buffer.slice(offset);
 
   return {
     type: type === 0 ? 'video' : 'audio',
     timestamp,
     duration,
     keyframe,
-    description,
+    decoderConfig,
     data
   };
 }
@@ -155,44 +169,34 @@ async function stopRecording() {
  */
 
 
-let startedYet = false;
-
-
 async function handleFrame(frame) {
-  if (!currentRecording) {
-    return; // Not recording, ignore frame
-  }
-
-  if(frame.type === 'video' && frame.keyframe){
-    startedYet = true;
-  }
-  if(!startedYet) return;
-
   try {
+    // Always cache decoderConfig (even when not recording)
+    if (frame.type === 'video' && frame.decoderConfig) {
+      videoDecoderConfig = frame.decoderConfig;
+      console.log('Received video decoderConfig:', videoDecoderConfig);
+    } else if (frame.type === 'audio' && frame.decoderConfig) {
+      audioDecoderConfig = frame.decoderConfig;
+      console.log('Received audio decoderConfig:', audioDecoderConfig);
+    }
+
+    // Only write frames if recording
+    if (!currentRecording) {
+      return;
+    }
+
     if (frame.type === 'video') {
       const packetType = frame.keyframe ? 'key' : 'delta';
+      const packet = new EncodedPacket(frame.data, packetType, frame.timestamp, frame.duration);
 
-      // Add to video source (description is already Uint8Array or undefined)
-      const packet = new EncodedPacket(frame.data, packetType, frame.timestamp/1e6, frame.duration/1e6);
-      currentRecording.videoSource.add(packet, {
-          decoderConfig: {
-
-            codec:  "vp09.00.31.08",
-            codedHeight: 720,
-            codedWidth: 1280
-          }
-      });
+      // Pass decoderConfig as meta
+      currentRecording.videoSource.add(packet, videoDecoderConfig ? { decoderConfig: videoDecoderConfig } : undefined);
       currentRecording.videoFrames++;
     } else if (frame.type === 'audio') {
-      // Add to audio source (description is already Uint8Array or undefined)
-      const packet = new EncodedPacket(frame.data, 'key', frame.timestamp/1e6, frame.duration/1e6);
-      currentRecording.audioSource.add(packet, {
-        decoderConfig: {
-                codec: "opus",
-        numberOfChannels: 1,
-        sampleRate: 48000
-        }
-      });
+      const packet = new EncodedPacket(frame.data, 'key', frame.timestamp, frame.duration);
+
+      // Pass decoderConfig as meta
+      currentRecording.audioSource.add(packet, audioDecoderConfig ? { decoderConfig: audioDecoderConfig } : undefined);
       currentRecording.audioFrames++;
     }
   } catch (error) {
