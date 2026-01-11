@@ -378,7 +378,7 @@
           const audioSettings = audioTrack.getSettings();
           const sampleRate = await getSampleRate(audioTrack);
 
-          const codec = 'vp9';
+          const codec = 'avc';
           const bitrate = getBitrate(videoSettings.width, videoSettings.height, 30, 'good');
           const codecString = getCodecString(codec, videoSettings.width, videoSettings.height, bitrate);
 
@@ -558,7 +558,7 @@
         const audioSettings = audioTrack.getSettings();
         const sampleRate = await getSampleRate(audioTrack);
 
-        const codec = 'vp9';
+        const codec = 'avc';
         const bitrate = getBitrate(videoSettings.width, videoSettings.height, 30, 'good');
         const codecString = getCodecString(codec, videoSettings.width, videoSettings.height, bitrate);
 

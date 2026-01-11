@@ -1,6 +1,6 @@
 import express from 'express';
 import { WebSocketServer } from 'ws';
-import { Output, EncodedPacket, EncodedVideoPacketSource,EncodedAudioPacketSource, FilePathTarget, WebMOutputFormat } from 'mediabunny';
+import { Output, EncodedPacket, EncodedVideoPacketSource,EncodedAudioPacketSource, FilePathTarget, Mp4OutputFormat, WebMOutputFormat } from 'mediabunny';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import fs from 'fs';
@@ -90,7 +90,7 @@ async function startRecording(ws, config) {
   }
 
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-  const outputPath = join(RECORDINGS_DIR, `recording-${timestamp}.webm`);
+  const outputPath = join(RECORDINGS_DIR, `recording-${timestamp}.mp4`);
 
   console.log('Creating output file:', outputPath);
   console.log('Video config:', config.video);
@@ -98,7 +98,7 @@ async function startRecording(ws, config) {
 
   // Create output using MediaBunny API
   const output = new Output({
-    format: new WebMOutputFormat(),
+    format: new Mp4OutputFormat(),
     target: new FilePathTarget(outputPath),
   });
 
@@ -209,6 +209,8 @@ async function handleFrame(frame) {
 //  currentRecording.videoSource.add(packet, videoDecoderConfig ? { decoderConfig: videoDecoderConfig } : undefined);
 
       if(!addedVideoConfig){
+        console.log("video decoder config");
+        console.log(videoDecoderConfig)
         currentRecording.videoSource.add(packet, { decoderConfig: videoDecoderConfig });
         addedVideoConfig = true;
       } else{
