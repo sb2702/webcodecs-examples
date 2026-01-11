@@ -148,27 +148,16 @@ async function handleFrame(frame) {
 
   try {
     if (frame.type === 'video') {
-      // Create EncodedVideoChunk
-      const chunk = new EncodedVideoChunk({
-        type: frame.keyframe ? 'key' : 'delta',
-        timestamp: frame.timestamp,
-        data: frame.data
-      });
+
 
       // Add to video source
-      const packet = EncodedPacket.fromEncodedVideoChunk(chunk);
+      const packet = new EncodedPacket(frame.data, packetType, frame.timestamp, frame.duration);
       currentRecording.videoSource.add(packet);
       currentRecording.videoFrames++;
     } else if (frame.type === 'audio') {
-      // Create EncodedAudioChunk
-      const chunk = new EncodedAudioChunk({
-        type: 'key',
-        timestamp: frame.timestamp,
-        data: frame.data
-      });
 
       // Add to audio source
-      const packet = EncodedPacket.fromEncodedAudioChunk(chunk);
+      const packet = new EncodedPacket(frame.data, 'key', frame.timestamp, frame.duration);
       currentRecording.audioSource.add(packet);
       currentRecording.audioFrames++;
     }
@@ -188,7 +177,6 @@ wss.on('connection', (ws) => {
   ws.on('message', async (data) => {
 
 
-    console.log("Websocket message")
     try {
       // Check if it's JSON (control message)
       if (data[0] === 0x7B) { // '{' character
@@ -210,8 +198,6 @@ wss.on('connection', (ws) => {
         }
       } else {
 
-
-    console.log("Data received");
         // Binary frame data
         const frame = parseFrame(data);
         if (frame.type === 'config') {
