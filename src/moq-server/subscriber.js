@@ -1,6 +1,6 @@
 import express from 'express';
 import { WebSocketServer } from 'ws';
-import { Output, EncodedPacket, EncodedVideoPacketSource,EncodedAudioPacketSource, BufferTarget, WebMOutputFormat } from 'mediabunny';
+import { Output, EncodedPacket, EncodedVideoPacketSource,EncodedAudioPacketSource, FilePathTarget, WebMOutputFormat } from 'mediabunny';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import fs from 'fs';
@@ -76,7 +76,7 @@ async function startRecording(ws, config) {
   }
 
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-  const outputPath = join(RECORDINGS_DIR, `recording-${timestamp}.mp4`);
+  const outputPath = join(RECORDINGS_DIR, `recording-${timestamp}.webm`);
 
   console.log('Creating output file:', outputPath);
   console.log('Video config:', config.video);
@@ -85,7 +85,7 @@ async function startRecording(ws, config) {
   // Create output using MediaBunny API
   const output = new Output({
     format: new WebMOutputFormat(),
-    target: new BufferTarget(),
+    target: new FilePathTarget(outputPath),
   });
 
   // Create video source
@@ -163,8 +163,6 @@ async function handleFrame(frame) {
     return; // Not recording, ignore frame
   }
 
-  console.log("Frame description", frame.description)
-
   if(frame.type === 'video' && frame.keyframe){
     startedYet = true;
   }
@@ -175,7 +173,7 @@ async function handleFrame(frame) {
       const packetType = frame.keyframe ? 'key' : 'delta';
 
       // Add to video source (description is already Uint8Array or undefined)
-      const packet = new EncodedPacket(frame.data, packetType, frame.timestamp, frame.duration);
+      const packet = new EncodedPacket(frame.data, packetType, frame.timestamp/1e6, frame.duration/1e6);
       currentRecording.videoSource.add(packet, {
           decoderConfig: {
 
@@ -187,7 +185,7 @@ async function handleFrame(frame) {
       currentRecording.videoFrames++;
     } else if (frame.type === 'audio') {
       // Add to audio source (description is already Uint8Array or undefined)
-      const packet = new EncodedPacket(frame.data, 'key', frame.timestamp, frame.duration);
+      const packet = new EncodedPacket(frame.data, 'key', frame.timestamp/1e6, frame.duration/1e6);
       currentRecording.audioSource.add(packet, {
         decoderConfig: {
                 codec: "opus",
