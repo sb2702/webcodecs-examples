@@ -211,8 +211,6 @@ async function stopRecording() {
  */
 async function handleVideoFrame(frame, isKeyframe) {
 
-
-  console.log("Video frame")
   try {
     // Only write frames if recording
     if (!currentRecording) {
@@ -253,8 +251,7 @@ async function handleVideoFrame(frame, isKeyframe) {
  * Handle incoming audio frame
  */
 async function handleAudioFrame(frame) {
-
-  console.log("Audio frame")
+  
   try {
     // Only write frames if recording
     if (!currentRecording) {
