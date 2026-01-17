@@ -2,8 +2,6 @@ import { Input, ALL_FORMATS, BlobSource } from 'mediabunny';
 import WebSocket from 'ws';
 global.WebSocket = WebSocket;
 
-import { install } from "@moq/web-transport-ws"
-install(); // Polyfills globalThis.WebTransport in Node.js
 
 
 // Add global error handlers
