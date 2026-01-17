@@ -91,19 +91,25 @@ async function startRecording(config) {
 
 
   // Subscribe to tracks
-  const videoTrack = broadcast.subscribe('video');
-  const audioTrack = broadcast.subscribe('audio');
+  const videoTrack = await broadcast.subscribe('video');
+
+  const audioTrack = await broadcast.subscribe('audio');
+
+
+
+  processVideoTrack(videoTrack);
+
+  await new Promise((r)=>setTimeout(r, 20));
+
+
+
+
+
+  processAudioTrack(audioTrack)
 
   console.log('Subscribed to video and audio tracks');
   console.log('Ready to record when publisher starts streaming');
 
-  // Process tracks in parallel
-  Promise.all([
-    processVideoTrack(videoTrack),
- //   processAudioTrack(audioTrack)
-  ]).catch((error) => {
-    console.error('Track processing error:', error);
-  });
 
 
   if (currentRecording) {
@@ -184,7 +190,7 @@ async function stopRecording() {
 async function handleVideoFrame(frame, isKeyframe) {
 
 
-  console.log("Video frame", frame)
+  console.log("Video frame")
   try {
     // Only write frames if recording
     if (!currentRecording) {
@@ -225,6 +231,8 @@ async function handleVideoFrame(frame, isKeyframe) {
  * Handle incoming audio frame
  */
 async function handleAudioFrame(frame) {
+
+  console.log("Audio frame")
   try {
     // Only write frames if recording
     if (!currentRecording) {
