@@ -66,7 +66,7 @@
     }
 
     button:disabled {
-      background: #cbd5e0;
+      background: #cbd5e0 !important;
       cursor: not-allowed;
     }
 
@@ -450,8 +450,6 @@
 
     async function stopStreaming() {
       // Stop publisher
-
-
       if (publisher) {
         publisher.stop();
       }
@@ -481,7 +479,7 @@
       updatePublisherStatus('Stopped streaming', 'info');
       log('Stopped streaming', 'info');
 
-      startStreamBtn.disabled = false;
+      startStreamBtn.disabled = true;
       stopStreamBtn.disabled = true;
     }
 

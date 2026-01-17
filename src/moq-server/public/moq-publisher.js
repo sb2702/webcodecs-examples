@@ -90,6 +90,11 @@ export class MoqPublisher {
         .pipeThrough(videoEncoderStream)
         .pipeTo(this.createVideoWriter(this.videoMoqTrack), {
           signal: this.abortController.signal
+        })
+        .catch(e => {
+          if (e.name !== 'AbortError') {
+            console.error('Video pipeline error:', e);
+          }
         });
     } else if (requestedTrack.name === 'audio' && !this.audioMoqTrack) {
       this.audioMoqTrack = requestedTrack;
@@ -103,6 +108,11 @@ export class MoqPublisher {
         .pipeThrough(audioEncoderStream)
         .pipeTo(this.createAudioWriter(this.audioMoqTrack), {
           signal: this.abortController.signal
+        })
+        .catch(e => {
+          if (e.name !== 'AbortError') {
+            console.error('Audio pipeline error:', e);
+          }
         });
     }
   }
@@ -179,14 +189,8 @@ export class MoqPublisher {
 
   stop() {
     if (this.abortController) {
-      
-      try{
-        this.abortController.abort();
-        this.abortController = null;
-      } catch (e) {
-        
-      }
-
+      this.abortController.abort();
+      this.abortController = null;
     }
   }
 
