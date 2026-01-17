@@ -1,9 +1,13 @@
 import express from 'express';
-import { WebSocketServer } from 'ws';
-import { Output, EncodedPacket, EncodedVideoPacketSource,EncodedAudioPacketSource, FilePathTarget,  Mp4OutputFormat, WebMOutputFormat } from 'mediabunny';
+import WebSocket from 'ws';
+import * as Moq from '@moq/lite';
+import { Output, EncodedPacket, EncodedVideoPacketSource, EncodedAudioPacketSource, FilePathTarget, Mp4OutputFormat } from 'mediabunny';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import fs from 'fs';
+
+// Polyfill WebSocket for MoQ
+globalThis.WebSocket = WebSocket;
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -14,6 +18,8 @@ app.use(express.static(join(__dirname, 'public')));
 
 const PORT = 3000;
 const RECORDINGS_DIR = join(__dirname, 'recordings');
+const RELAY_URL = 'https://usc.cdn.moq.dev/anon';
+const BROADCAST_NAME = 'server-recording';
 
 // Ensure recordings directory exists
 if (!fs.existsSync(RECORDINGS_DIR)) {
@@ -22,72 +28,89 @@ if (!fs.existsSync(RECORDINGS_DIR)) {
 
 // State
 let currentRecording = null;
-let recordingClient = null;
 let videoDecoderConfig = null;
 let audioDecoderConfig = null;
+let addedAudioConfig = false;
+let addedVideoConfig = false;
+let moqConnection = null;
+let catalog = null;
+let broadcast = null;
 
 /**
- * Parse binary frame format:
- * [type (1 byte)][timestamp (8 bytes)][duration (8 bytes)][keyframe (1 byte)]
- * [configLength (4 bytes)][config JSON][descLength (4 bytes)][description][data]
- * type: 0 = video, 1 = audio, 2 = config
+ * Parse video frame from MoQ format: [timestamp (8 bytes)] [data]
  */
-function parseFrame(buffer) {
+function parseVideoFrame(buffer, isKeyframe) {
   const view = new DataView(buffer.buffer, buffer.byteOffset);
+  const timestamp = Number(view.getBigUint64(0, true));
+  const type = isKeyframe ? 'key' : 'delta';
+  const data = buffer.slice(8);
 
-  const type = view.getUint8(0);
-
-  if (type === 2) {
-    // Config message: [type][config JSON]
-    const configJson = buffer.slice(1).toString();
-    return { type: 'config', config: JSON.parse(configJson) };
-  }
-
-  let offset = 0;
-  offset += 1; // type
-  const timestamp = Number(view.getBigUint64(offset, true)); offset += 8;
-  const duration = Number(view.getBigUint64(offset, true)); offset += 8;
-  const keyframe = view.getUint8(offset) === 1; offset += 1;
-  const configLength = view.getUint32(offset, true); offset += 4;
-
-  let decoderConfig = null;
-
-  if (configLength > 0) {
-    // Parse config JSON
-    const configBytes = buffer.slice(offset, offset + configLength);
-    const configJson = new TextDecoder().decode(configBytes);
-    const meta = JSON.parse(configJson);
-    decoderConfig = meta.decoderConfig || null;
-    offset += configLength;
-  }
-
-  // Parse description (always present in protocol, even if 0 length)
-  const descLength = view.getUint32(offset, true); offset += 4;
-  if (descLength > 0 && decoderConfig) {
-    const description = buffer.slice(offset, offset + descLength);
-    decoderConfig.description = description;
-    offset += descLength;
-  }
-
-  const data = buffer.slice(offset);
-
-  return {
-    type: type === 0 ? 'video' : 'audio',
-    timestamp,
-    duration,
-    keyframe,
-    decoderConfig,
-    data
-  };
+  return { timestamp, type, data };
 }
 
 /**
- * Start recording from WebSocket stream
+ * Parse audio frame from MoQ format: [timestamp (8 bytes)] [data]
  */
-async function startRecording(ws, config) {
+function parseAudioFrame(buffer) {
+  const view = new DataView(buffer.buffer, buffer.byteOffset);
+  const timestamp = Number(view.getBigUint64(0, true));
+  const data = buffer.slice(8);
+
+  return { timestamp, data };
+}
+
+/**
+ * Get catalog from broadcast
+ */
+async function getCatalog(broadcast) {
+  try {
+    console.log('Requesting catalog...');
+    const catalogTrack = broadcast.subscribe('catalog.json');
+
+    for (;;) {
+      const catalogGroup = await catalogTrack.nextGroup();
+
+      if (catalogGroup) {
+        const catalogJson = await catalogGroup.readString();
+        const catalogData = JSON.parse(catalogJson);
+        console.log('Received catalog');
+        return catalogData;
+      }
+    }
+  } catch (e) {
+    console.error('Error getting catalog, retrying...', e.message);
+    await new Promise((r) => setTimeout(r, 500));
+    return await getCatalog(broadcast);
+  }
+}
+
+/**
+ * Start recording
+ */
+async function startRecording(config) {
+
+
+  // Subscribe to tracks
+  const videoTrack = broadcast.subscribe('video');
+  const audioTrack = broadcast.subscribe('audio');
+
+  console.log('Subscribed to video and audio tracks');
+  console.log('Ready to record when publisher starts streaming');
+
+  // Process tracks in parallel
+  Promise.all([
+    processVideoTrack(videoTrack),
+ //   processAudioTrack(audioTrack)
+  ]).catch((error) => {
+    console.error('Track processing error:', error);
+  });
+
+
   if (currentRecording) {
     throw new Error('Already recording');
   }
+
+
 
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
   const outputPath = join(RECORDINGS_DIR, `recording-${timestamp}.mp4`);
@@ -102,15 +125,11 @@ async function startRecording(ws, config) {
     target: new FilePathTarget(outputPath),
   });
 
-  // Create video source
-  const videoCodec = config.video.codec.startsWith('avc') ? 'avc' :
-                     config.video.codec.startsWith('vp9') ? 'vp9' : 'av1';
+  // Create sources
   const videoSource = new EncodedVideoPacketSource('avc');
-  output.addVideoTrack(videoSource);
+  const audioSource = new EncodedAudioPacketSource('opus');
 
-  // Create audio source
-  const audioCodec = config.audio.codec.startsWith('opus') ? 'opus' : 'aac';
-  const audioSource = new EncodedAudioPacketSource('opus' );
+  output.addVideoTrack(videoSource);
   output.addAudioTrack(audioSource);
 
   // Start output
@@ -132,10 +151,7 @@ async function startRecording(ws, config) {
     firstAudioTimestamp: null
   };
 
-  recordingClient = ws;
-
   console.log(`Recording started: ${outputPath}`);
-  ws.send(JSON.stringify({ type: 'recording-started', outputPath }));
 
   return { outputPath };
 }
@@ -154,168 +170,275 @@ async function stopRecording() {
   const { output, outputPath } = currentRecording;
 
   currentRecording = null;
-  //recordingClient = null;
+
   // Finalize the output file
   await output.finalize();
 
   console.log(`Recording saved: ${outputPath}`);
-  return {};
+  return { outputPath };
 }
 
 /**
- * Handle incoming frame data
+ * Handle incoming video frame
  */
+async function handleVideoFrame(frame, isKeyframe) {
 
 
-let addedAudioConfig = false;
-let addedVideoConfig  = false;
-
-async function handleFrame(frame) {
-
+  console.log("Video frame", frame)
   try {
-    // Always cache decoderConfig (even when not recording)
-    if (frame.type === 'video' && frame.decoderConfig) {
-      videoDecoderConfig = frame.decoderConfig;
-      console.log('Received video decoderConfig:', videoDecoderConfig);
-    } else if (frame.type === 'audio' && frame.decoderConfig) {
-      audioDecoderConfig = frame.decoderConfig;
-      console.log('Received audio decoderConfig:', audioDecoderConfig);
-    }
-
     // Only write frames if recording
     if (!currentRecording) {
       return;
     }
 
-    if (frame.type === 'video') {
-      // Set first timestamp on first keyframe
-      if (frame.keyframe && currentRecording.firstVideoTimestamp === null) {
-        currentRecording.firstVideoTimestamp = frame.timestamp;
-      }
-
-      // Skip frames until we have a keyframe
-      if (currentRecording.firstVideoTimestamp === null) {
-        return;
-      }
-
-      const relativeTimestamp = (frame.timestamp - currentRecording.firstVideoTimestamp);
-      const packetType = frame.keyframe ? 'key' : 'delta';
-      const packet = new EncodedPacket(frame.data, packetType, relativeTimestamp/1e6, frame.duration/1e6);
-
-      // Pass decoderConfig as meta
-//  currentRecording.videoSource.add(packet, videoDecoderConfig ? { decoderConfig: videoDecoderConfig } : undefined);
-
-      if(!addedVideoConfig){
-        console.log("video decoder config");
-        console.log(videoDecoderConfig)
-        currentRecording.videoSource.add(packet, { decoderConfig: videoDecoderConfig });
-        addedVideoConfig = true;
-      } else{
-        currentRecording.videoSource.add(packet);
-      }
-
-      currentRecording.videoFrames++;
-    } else if (frame.type === 'audio') {
-      // Set first timestamp on first audio frame
-      if (currentRecording.firstAudioTimestamp === null) {
-        currentRecording.firstAudioTimestamp = frame.timestamp;
-      }
-
-      const relativeTimestamp = (frame.timestamp - currentRecording.firstAudioTimestamp);
-      const packet = new EncodedPacket(frame.data, 'key', relativeTimestamp/1e6, frame.duration/1e6);
-
-      // Pass decoderConfig as meta
 
 
-
-      if(!addedAudioConfig){
-        currentRecording.audioSource.add(packet, { decoderConfig: audioDecoderConfig } );
-        addedAudioConfig = true;
-      } else{
-        currentRecording.audioSource.add(packet);
-      }
-
-      currentRecording.audioFrames++;
+    // Set first timestamp on first keyframe
+    if (isKeyframe && currentRecording.firstVideoTimestamp === null) {
+      currentRecording.firstVideoTimestamp = frame.timestamp;
     }
+
+    // Skip frames until we have a keyframe
+    if (currentRecording.firstVideoTimestamp === null) {
+      return;
+    }
+
+    const relativeTimestamp = (frame.timestamp - currentRecording.firstVideoTimestamp) / 1e6;
+    const packet = new EncodedPacket(frame.data, frame.type, relativeTimestamp, 0);
+
+    // Add decoderConfig on first packet only
+    if (!addedVideoConfig) {
+      currentRecording.videoSource.add(packet, { decoderConfig: videoDecoderConfig });
+      addedVideoConfig = true;
+      console.log('Added video decoderConfig to first packet');
+    } else {
+      currentRecording.videoSource.add(packet);
+    }
+
+    currentRecording.videoFrames++;
   } catch (error) {
-    console.error('Error writing frame:', error);
+    console.error('Error handling video frame:', error);
   }
 }
 
-// Create WebSocket server
-const wss = new WebSocketServer({ noServer: true });
+/**
+ * Handle incoming audio frame
+ */
+async function handleAudioFrame(frame) {
+  try {
+    // Only write frames if recording
+    if (!currentRecording) {
+      return;
+    }
 
-wss.on('connection', (ws) => {
-  console.log('Client connected');
+    // Set first timestamp on first audio frame
+    if (currentRecording.firstAudioTimestamp === null) {
+      currentRecording.firstAudioTimestamp = frame.timestamp;
+    }
 
-  let config = null;
+    const relativeTimestamp = (frame.timestamp - currentRecording.firstAudioTimestamp) / 1e6;
+    const packet = new EncodedPacket(frame.data, 'key', relativeTimestamp, 0);
 
-  ws.on('message', async (data) => {
+    // Add decoderConfig on first packet only
+    if (!addedAudioConfig) {
+      currentRecording.audioSource.add(packet, { decoderConfig: audioDecoderConfig });
+      addedAudioConfig = true;
+      console.log('Added audio decoderConfig to first packet');
+    } else {
+      currentRecording.audioSource.add(packet);
+    }
+
+    currentRecording.audioFrames++;
+  } catch (error) {
+    console.error('Error handling audio frame:', error);
+  }
+}
+
+/**
+ * Process video track from MoQ
+ */
+async function processVideoTrack(videoTrack) {
+  console.log('Processing video track...');
+
+
+  return new Promise(async function(resolve, reject) {
+
+    await new Promise(r => setTimeout(r, 200));
+
+    const videoRendition = Object.values(catalog.video.renditions)[0];
+
+    // Prepare decoderConfig for MediaBunny
+    videoDecoderConfig = {
+      codec: videoRendition.codec,
+      codedWidth: videoRendition.codedWidth,
+      codedHeight: videoRendition.codedHeight,
+    };
+
+    // Add description if present (required for AVC)
+    if (videoRendition.description) {
+      const base64 = videoRendition.description;
+      const binaryString = Buffer.from(base64, 'base64').toString('binary');
+      const bytes = new Uint8Array(binaryString.length);
+      for (let i = 0; i < binaryString.length; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
+      }
+      videoDecoderConfig.description = bytes;
+    }
+
+    console.log('Video decoder config ready');
+
     try {
-      // Check if it's JSON (control message)
-      if (data[0] === 0x7B) { // '{' character
-        const message = JSON.parse(data.toString());
+      while (true) {
+        console.log("Waiting for next group")
+        const group = await videoTrack.nextGroup();
+        console.log("Next group");
+        console.log(group)
+        if (!group) break;
 
-        if (message.type === 'config') {
-          config = message;
-          console.log('Received config:', config);
-          ws.send(JSON.stringify({ type: 'config-received' }));
-        } else if (message.type === 'start-recording') {
-          if (!config) {
-            ws.send(JSON.stringify({ type: 'error', message: 'Config not received' }));
-            return;
-          }
-          await startRecording(ws, config);
-        } else if (message.type === 'stop-recording') {
-          const stats = await stopRecording();
-          ws.send(JSON.stringify({ type: 'recording-stopped', stats }));
+        // First frame in group is always a keyframe
+        let isKeyframe = true;
+
+        // Read all frames in the group
+        for (;;) {
+          const frameData = await group.readFrame();
+          if (!frameData) break;
+
+          const frame = parseVideoFrame(frameData, isKeyframe);
+          await handleVideoFrame(frame, isKeyframe);
+
+          isKeyframe = false; // Subsequent frames are delta
         }
-      } else {
-        // Binary frame data
-        const frame = parseFrame(data);
-        await handleFrame(frame);
       }
     } catch (error) {
-      console.error('Error handling message:', error);
-      ws.send(JSON.stringify({ type: 'error', message: error.message }));
+      console.error('Video processing error:', error);
     }
-  });
 
-  ws.on('close', async () => {
-    console.log('Client disconnected');
-    if (currentRecording && recordingClient === ws) {
-      console.log('Client disconnected during recording, finalizing...');
-      await stopRecording();
+  })
+
+
+}
+
+/**
+ * Process audio track from MoQ
+ */
+async function processAudioTrack(audioTrack) {
+  console.log('Processing audio track...');
+
+
+  return new Promise(async function(resolve, reject) {
+
+    await new Promise((r)=>setTimeout(r, 200));
+    const audioRendition = Object.values(catalog.audio.renditions)[0];
+
+    // Prepare decoderConfig for MediaBunny
+    audioDecoderConfig = {
+      codec: audioRendition.codec,
+      sampleRate: audioRendition.sampleRate,
+      numberOfChannels: audioRendition.numberOfChannels,
+    };
+
+    console.log('Audio decoder config ready');
+
+    try {
+      while (true) {
+        const group = await audioTrack.nextGroup();
+        if (!group) break;
+
+        const frameData = await group.readFrame();
+        if (!frameData) continue;
+
+        const frame = parseAudioFrame(frameData);
+        await handleAudioFrame(frame);
+      }
+    } catch (error) {
+      console.error('Audio processing error:', error);
     }
-  });
 
-  ws.on('error', (error) => {
-    console.error('WebSocket error:', error);
-  });
+  })
 
-  ws.send(JSON.stringify({ type: 'connected' }));
-});
+}
 
-// Upgrade HTTP server to WebSocket
-const server = app.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`);
-  console.log(`WebSocket available at ws://localhost:${PORT}`);
-  console.log(`Recordings will be saved to: ${RECORDINGS_DIR}`);
-});
+/**
+ * Connect to MoQ relay and subscribe to broadcast
+ */
+async function connectToMoQ() {
+  try {
+    console.log('Connecting to MoQ relay:', RELAY_URL);
+    moqConnection = await Moq.Connection.connect(new URL(RELAY_URL));
+    console.log('Connected to MoQ relay');
 
-server.on('upgrade', (request, socket, head) => {
-  wss.handleUpgrade(request, socket, head, (ws) => {
-    wss.emit('connection', ws, request);
-  });
-});
+    // Consume broadcast
+    broadcast = moqConnection.consume(BROADCAST_NAME);
+    console.log(`Consuming broadcast: ${BROADCAST_NAME}`);
 
-// API endpoints for status
+    // Get catalog
+    catalog = await getCatalog(broadcast);
+    console.log('Catalog received, waiting for publisher to start streaming...');
+
+  } catch (error) {
+    console.error('MoQ connection error:', error);
+    console.error('Retrying in 5 seconds...');
+    setTimeout(connectToMoQ, 5000);
+  }
+}
+
+// API endpoints
 app.get('/api/status', (req, res) => {
   res.json({
     recording: currentRecording !== null,
     outputPath: currentRecording?.outputPath || null,
     duration: currentRecording ? Date.now() - currentRecording.startTime : 0,
     videoFrames: currentRecording?.videoFrames || 0,
-    audioFrames: currentRecording?.audioFrames || 0
+    audioFrames: currentRecording?.audioFrames || 0,
+    moqConnected: moqConnection !== null,
+    catalogReceived: catalog !== null
   });
+});
+
+app.post('/api/start-recording', async (req, res) => {
+  try {
+    if (!catalog) {
+      res.status(400).json({ error: 'No catalog received yet' });
+      return;
+    }
+
+    const config = {
+      video: Object.values(catalog.video.renditions)[0],
+      audio: Object.values(catalog.audio.renditions)[0]
+    };
+
+    await startRecording(config);
+    res.json({ success: true, outputPath: currentRecording.outputPath });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/stop-recording', async (req, res) => {
+  try {
+    const result = await stopRecording();
+    res.json({ success: true, ...result });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Start Express server
+const server = app.listen(PORT, () => {
+  console.log(`Server running on http://localhost:${PORT}`);
+  console.log(`Recordings will be saved to: ${RECORDINGS_DIR}`);
+  console.log(`Broadcast name: ${BROADCAST_NAME}`);
+  console.log('---');
+});
+
+// Connect to MoQ relay
+connectToMoQ();
+
+// Handle graceful shutdown
+process.on('SIGINT', async () => {
+  console.log('\nReceived SIGINT, shutting down...');
+  if (currentRecording) {
+    await stopRecording();
+  }
+  process.exit(0);
 });

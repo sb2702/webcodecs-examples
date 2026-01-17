@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Browser to Server Recording</title>
+  <title>Browser to Server Recording (MoQ)</title>
   <style>
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
@@ -178,9 +178,9 @@
 </head>
 <body>
   <div class="container">
-    <h1>📹 Browser to Server Recording (WebSocket)</h1>
+    <h1>📹 Browser to Server Recording (MoQ)</h1>
     <p class="description">
-      Stream your webcam to a Node.js server via WebSocket. The server receives encoded video/audio chunks
+      Stream your webcam to a Node.js server via Media over QUIC (MoQ). The server receives encoded video/audio
       and saves them to a file using MediaBunny.
     </p>
 
@@ -224,7 +224,8 @@
   </div>
 
   <script type="module">
-    import {  getSampleRate, getBitrate, getCodecString } from 'https://cdn.jsdelivr.net/npm/webcodecs-examples@0.1.14/dist/index.js';
+    import * as Moq from 'https://esm.sh/@moq/lite';
+    import { MoqPublisher, getSampleRate, getBitrate, getCodecString } from 'https://cdn.jsdelivr.net/npm/webcodecs-examples@0.1.14/dist/index.js';
 
     // UI Elements
     const publisherStatus = document.getElementById('publisherStatus');
@@ -243,18 +244,14 @@
     let stream = null;
     let videoTrack = null;
     let audioTrack = null;
-    let ws = null;
-    let videoEncoder = null;
-    let audioEncoder = null;
-    let videoProcessor = null;
-    let audioProcessor = null;
-    let streaming = false;
-    let videoFrameCount = 0;
-    let audioFrameCount = 0;
+    let connection = null;
+    let broadcast = null;
+    let publisher = null;
     let startTime = 0;
     let statsInterval = null;
-    let recordingStartedPromise = null;
-    let recordingStartedResolve = null;
+
+    const RELAY_URL = 'https://usc.cdn.moq.dev/anon';
+    const BROADCAST_NAME = 'server-recording';
 
     function log(message, type = 'info') {
       const entry = document.createElement('div');
@@ -277,57 +274,14 @@
     }
 
     function updateStats() {
-      videoFrameCountEl.textContent = videoFrameCount;
-      audioFrameCountEl.textContent = audioFrameCount;
+      if (publisher) {
+        videoFrameCountEl.textContent = publisher.videoFrameCount || 0;
+        audioFrameCountEl.textContent = publisher.audioFrameCount || 0;
+      }
       if (startTime > 0) {
         const duration = Math.floor((Date.now() - startTime) / 1000);
         durationEl.textContent = `${duration}s`;
       }
-    }
-
-    /**
-     * Encode frame in binary format:
-     * [type (1 byte)][timestamp (8 bytes)][duration (8 bytes)][keyframe (1 byte)]
-     * [configLength (4 bytes)][config JSON][descLength (4 bytes)][description][data]
-     */
-    function encodeFrame(type, chunk, isKeyframe = false, meta = null) {
-      const chunkData = new Uint8Array(chunk.byteLength);
-      chunk.copyTo(chunkData);
-
-      let configBytes = new Uint8Array(0);
-      let descriptionBytes = new Uint8Array(0);
-
-      if (meta && meta.decoderConfig) {
-        // Extract description separately
-        const { description, ...configWithoutDesc } = meta.decoderConfig;
-
-        // Serialize config without description
-        const configJson = JSON.stringify({ decoderConfig: configWithoutDesc });
-        configBytes = new TextEncoder().encode(configJson);
-
-        // Keep description as binary
-        if (description) {
-          descriptionBytes = new Uint8Array(description);
-        }
-      }
-
-      const buffer = new Uint8Array(26 + configBytes.byteLength + descriptionBytes.byteLength + chunkData.byteLength);
-      const view = new DataView(buffer.buffer);
-
-      let offset = 0;
-      view.setUint8(offset, type); offset += 1; // 0 = video, 1 = audio
-      view.setBigUint64(offset, BigInt(chunk.timestamp), true); offset += 8;
-      view.setBigUint64(offset, BigInt(chunk.duration || 0), true); offset += 8;
-      view.setUint8(offset, isKeyframe ? 1 : 0); offset += 1;
-      view.setUint32(offset, configBytes.byteLength, true); offset += 4;
-
-      buffer.set(configBytes, offset); offset += configBytes.byteLength;
-
-      view.setUint32(offset, descriptionBytes.byteLength, true); offset += 4;
-      buffer.set(descriptionBytes, offset); offset += descriptionBytes.byteLength;
-      buffer.set(chunkData, offset);
-
-      return buffer;
     }
 
     async function startWebcam() {
@@ -356,220 +310,18 @@
 
     async function connectToServer() {
       try {
-        updatePublisherStatus('Connecting to server...', 'info');
+        updatePublisherStatus('Connecting to MoQ relay...', 'info');
 
-        ws = new WebSocket('ws://localhost:3000');
+        connection = await Moq.Connection.connect(new URL(RELAY_URL));
+        broadcast = new Moq.Broadcast();
+        connection.publish(BROADCAST_NAME, broadcast);
 
-        ws.onopen = async () => {
-          updatePublisherStatus('Connected to server', 'success');
-          updateServerStatus('Connected', 'success');
-          log('Connected to WebSocket server', 'success');
+        updatePublisherStatus('Connected to relay', 'success');
+        updateServerStatus('Waiting for server...', 'info');
+        log('Connected to MoQ relay', 'success');
+        log(`Publishing as: ${BROADCAST_NAME}`, 'info');
 
-          connectBtn.disabled = true;
-          startStreamBtn.disabled = false;
-
-          // Create promise that will resolve when recording starts
-          recordingStartedPromise = new Promise(resolve => {
-            recordingStartedResolve = resolve;
-          });
-
-          // Send config before streaming starts
-          const videoSettings = videoTrack.getSettings();
-          const audioSettings = audioTrack.getSettings();
-          const sampleRate = await getSampleRate(audioTrack);
-
-          const codec = 'avc';
-          const bitrate = getBitrate(videoSettings.width, videoSettings.height, 30, 'good');
-          const codecString = getCodecString(codec, videoSettings.width, videoSettings.height, bitrate);
-
-          const config = {
-            type: 'config',
-            video: {
-              codec: codecString,
-              width: videoSettings.width,
-              height: videoSettings.height,
-              bitrate: Math.round(bitrate),
-              framerate: 30,
-            },
-            audio: {
-              codec: 'opus',
-              sampleRate: sampleRate,
-              numberOfChannels: Math.min(audioSettings.channelCount || 2, 2),
-              bitrate: 128000,
-            }
-          };
-
-          ws.send(JSON.stringify(config));
-          log('Sent config to server', 'info');
-        };
-
-        ws.onmessage = (event) => {
-          const message = JSON.parse(event.data);
-
-          if (message.type === 'connected') {
-            log('Server acknowledged connection', 'success');
-          } else if (message.type === 'recording-started') {
-            log('Server started recording: ' + message.outputPath, 'success');
-            updateServerStatus('Recording...', 'recording');
-          } else if (message.type === 'recording-stopped') {
-            log('Server stopped recording', 'success');
-            log(`Saved: ${message.stats.outputPath}`, 'info');
-            log(`Video frames: ${message.stats.videoFrames}, Audio frames: ${message.stats.audioFrames}`, 'info');
-            updateServerStatus('Recording saved', 'success');
-          } else if (message.type === 'error') {
-            log('Server error: ' + message.message, 'error');
-          }
-        };
-
-        ws.onerror = (error) => {
-          log('WebSocket error', 'error');
-          updateServerStatus('Connection error', 'error');
-        };
-
-        ws.onclose = () => {
-          log('Disconnected from server', 'info');
-          updateServerStatus('Disconnected', 'error');
-          connectBtn.disabled = false;
-          startStreamBtn.disabled = true;
-          stopStreamBtn.disabled = true;
-        };
-
-      } catch (error) {
-        updatePublisherStatus('Connection failed', 'error');
-        log('Error: ' + error.message, 'error');
-      }
-    }
-
-    // Create encoder transform streams
-    class VideoEncoderTransform extends TransformStream {
-      constructor(config) {
-        let encoder;
-        let frameIndex = 0;
-        const frameDuration = Math.floor(1000000 / (config.framerate || 30)); // microseconds per frame
-
-        super({
-          start(controller) {
-            encoder = new VideoEncoder({
-              output: (chunk, meta) => {
-                controller.enqueue({ chunk, meta, isKeyframe: chunk.type === 'key' });
-              },
-              error: (e) => {
-                log('Video encoder error: ' + e.message, 'error');
-                controller.error(e);
-              }
-            });
-            encoder.configure(config);
-          },
-          async transform(frame, controller) {
-            while (encoder.encodeQueueSize >= 20) {
-              await new Promise(r => setTimeout(r, 10));
-            }
-
-            // Create new frame with duration if not set
-            let frameToEncode = frame;
-            if (!frame.duration) {
-              frameToEncode = new VideoFrame(frame, {
-                timestamp: frame.timestamp,
-                duration: frameDuration
-              });
-              frame.close();
-            }
-
-            encoder.encode(frameToEncode, { keyFrame: frameIndex % 60 === 0 });
-            frameToEncode.close();
-            frameIndex++;
-          },
-          async flush() {
-            await encoder.flush();
-            encoder.close();
-          }
-        }, { highWaterMark: 10 });
-      }
-    }
-
-    class AudioEncoderTransform extends TransformStream {
-      constructor(config) {
-        let encoder;
-
-        super({
-          start(controller) {
-            encoder = new AudioEncoder({
-              output: (chunk, meta) => {
-                controller.enqueue({ chunk, meta });
-              },
-              error: (e) => {
-                log('Audio encoder error: ' + e.message, 'error');
-                controller.error(e);
-              }
-            });
-            encoder.configure(config);
-          },
-          async transform(audioData, controller) {
-            while (encoder.encodeQueueSize >= 20) {
-              await new Promise(r => setTimeout(r, 10));
-            }
-            encoder.encode(audioData);
-            audioData.close();
-          },
-          async flush() {
-            await encoder.flush();
-            encoder.close();
-          }
-        }, { highWaterMark: 10 });
-      }
-    }
-
-    // WebSocket writer
-    function createWebSocketWriter(type) {
-      return new WritableStream({
-        write(data) {
-          if (ws && ws.readyState === WebSocket.OPEN) {
-            const chunk = type === 'video' ? data.chunk : data.chunk;
-            const isKeyframe = type === 'video' ? data.isKeyframe : false;
-            const meta = data.meta || null;
-            const buffer = encodeFrame(type === 'video' ? 0 : 1, chunk, isKeyframe, meta);
-            ws.send(buffer);
-
-            if (type === 'video') {
-              videoFrameCount++;
-            } else {
-              audioFrameCount++;
-            }
-          }
-        }
-      });
-    }
-
-    let abortController = null;
-
-    async function startStreaming() {
-      try {
-        updatePublisherStatus('Starting recording...', 'info');
-
-        // Tell server to start recording and wait for confirmation
-        ws.send(JSON.stringify({ type: 'start-recording' }));
-
-        // Wait for recording-started message
-        await new Promise((resolve, reject) => {
-          const timeout = setTimeout(() => reject(new Error('Recording start timeout')), 5000);
-          const handler = (event) => {
-            const message = JSON.parse(event.data);
-            if (message.type === 'recording-started') {
-              clearTimeout(timeout);
-              ws.removeEventListener('message', handler);
-              resolve();
-            } else if (message.type === 'error') {
-              clearTimeout(timeout);
-              ws.removeEventListener('message', handler);
-              reject(new Error(message.message));
-            }
-          };
-          ws.addEventListener('message', handler);
-        });
-
-        log('Server recording started, beginning stream...', 'success');
-        updatePublisherStatus('Starting encoders...', 'info');
-
+        // Create encoder configs
         const videoSettings = videoTrack.getSettings();
         const audioSettings = audioTrack.getSettings();
         const sampleRate = await getSampleRate(audioTrack);
@@ -593,40 +345,89 @@
           bitrate: 128000,
         };
 
-        // Create processors
-        const videoProcessor = new MediaStreamTrackProcessor({ track: videoTrack });
-        const audioProcessor = new MediaStreamTrackProcessor({ track: audioTrack });
+        // Get description using the same config
+        const description = await MoqPublisher.getDescription(videoTrack, videoConfig);
 
-        // Create encoder streams
-        const videoEncoderStream = new VideoEncoderTransform(videoConfig);
-        const audioEncoderStream = new AudioEncoderTransform(audioConfig);
+        const catalogData = {
+          video: {
+            renditions: {
+              video0: {
+                codec: codecString,
+                codedWidth: videoSettings.width,
+                codedHeight: videoSettings.height,
+                description
+              }
+            },
+            priority: 1
+          },
+          audio: {
+            renditions: {
+              audio0: audioConfig
+            },
+            priority: 2
+          }
+        };
 
-        streaming = true;
+        // Handle catalog requests
+        (async () => {
+          while (true) {
+            const trackRequest = await broadcast.requested();
+            const requestedTrack = trackRequest.track;
+
+            log(`Track requested: ${requestedTrack.name}`, 'info');
+
+            if (requestedTrack.name === 'catalog.json') {
+              const catalogJson = JSON.stringify(catalogData);
+              const group = requestedTrack.appendGroup();
+              group.writeString(catalogJson);
+              group.close();
+              log('Sent catalog to server', 'success');
+              updateServerStatus('Server connected', 'success');
+            }
+          }
+        })();
+
+        // Start MoQ publisher with configs
+        publisher = new MoqPublisher(videoTrack, audioTrack, broadcast, videoConfig, audioConfig);
+
+        connectBtn.disabled = true;
+        startStreamBtn.disabled = false;
+
+      } catch (error) {
+        updatePublisherStatus('Connection failed', 'error');
+        log('Error: ' + error.message, 'error');
+      }
+    }
+
+    async function startStreaming() {
+      try {
+        updatePublisherStatus('Starting recording...', 'info');
+        log('Calling /api/start-recording...', 'info');
+
+        // Tell server to start recording via API
+        const response = await fetch('/api/start-recording', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' }
+        });
+
+        log('API response status: ' + response.status, 'info');
+
+        if (!response.ok) {
+          const error = await response.json();
+          throw new Error(error.error || 'Failed to start recording');
+        }
+
+        const result = await response.json();
+        log('Server started recording: ' + result.outputPath, 'success');
+        updateServerStatus('Recording...', 'recording');
+
+        // Start publishing frames
+        log('Starting publisher...', 'info');
+        publisher.start();
+        log('Publisher started successfully', 'success');
+
         startTime = Date.now();
-        videoFrameCount = 0;
-        audioFrameCount = 0;
         statsInterval = setInterval(updateStats, 100);
-
-        abortController = new AbortController();
-
-        // Start pipelines
-        videoProcessor.readable
-          .pipeThrough(videoEncoderStream)
-          .pipeTo(createWebSocketWriter('video'), { signal: abortController.signal })
-          .catch(e => {
-            if (e.name !== 'AbortError') {
-              log('Video pipeline error: ' + e.message, 'error');
-            }
-          });
-
-        audioProcessor.readable
-          .pipeThrough(audioEncoderStream)
-          .pipeTo(createWebSocketWriter('audio'), { signal: abortController.signal })
-          .catch(e => {
-            if (e.name !== 'AbortError') {
-              log('Audio pipeline error: ' + e.message, 'error');
-            }
-          });
 
         updatePublisherStatus('Streaming to server', 'success');
         log('Started streaming', 'success');
@@ -637,26 +438,40 @@
       } catch (error) {
         updatePublisherStatus('Failed to start streaming', 'error');
         log('Streaming error: ' + error.message, 'error');
+        console.error('Full error:', error);
+
+        // Re-enable button on error
+        startStreamBtn.disabled = false;
+        stopStreamBtn.disabled = true;
       }
     }
 
     async function stopStreaming() {
-      streaming = false;
+      // Stop publisher
+      if (publisher) {
+        publisher.stop();
+      }
 
-      // Tell server to stop recording
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'stop-recording' }));
-        log('Requesting server to stop recording...', 'info');
+      // Tell server to stop recording via API
+      try {
+        const response = await fetch('/api/stop-recording', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' }
+        });
+
+        if (response.ok) {
+          const result = await response.json();
+          log('Server stopped recording', 'success');
+          log(`Saved: ${result.outputPath}`, 'info');
+          updateServerStatus('Recording saved', 'success');
+        }
+      } catch (error) {
+        log('Error stopping recording: ' + error.message, 'error');
       }
 
       if (statsInterval) {
         clearInterval(statsInterval);
         statsInterval = null;
-      }
-
-      if (abortController) {
-        abortController.abort();
-        abortController = null;
       }
 
       updatePublisherStatus('Stopped streaming', 'info');

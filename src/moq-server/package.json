@@ -6,7 +6,8 @@
   "type": "module",
   "scripts": {
     "subscriber": "node subscriber.js",
-    "publisher": "node publisher.js"
+    "publisher": "node publisher.js",
+    "moq-subscriber": "node moq-subscriber.js"
   },
   "author": "Sam Bhattacharyya",
   "license": "MIT",
