@@ -290,44 +290,38 @@ async function handleAudioFrame(frame) {
 async function processVideoTrack(videoTrack) {
   console.log('Processing video track...');
 
+  const videoRendition = Object.values(catalog.video.renditions)[0];
 
-  return new Promise(async function(resolve, reject) {
+  // Prepare decoderConfig for MediaBunny
+  videoDecoderConfig = {
+    codec: videoRendition.codec,
+    codedWidth: videoRendition.codedWidth,
+    codedHeight: videoRendition.codedHeight,
+  };
 
-
-    const videoRendition = Object.values(catalog.video.renditions)[0];
-
-    // Prepare decoderConfig for MediaBunny
-    videoDecoderConfig = {
-      codec: videoRendition.codec,
-      codedWidth: videoRendition.codedWidth,
-      codedHeight: videoRendition.codedHeight,
-    };
-
-    // Add description if present (required for AVC)
-    if (videoRendition.description) {
-      const base64 = videoRendition.description;
-      const binaryString = Buffer.from(base64, 'base64').toString('binary');
-      const bytes = new Uint8Array(binaryString.length);
-      for (let i = 0; i < binaryString.length; i++) {
-        bytes[i] = binaryString.charCodeAt(i);
-      }
-      videoDecoderConfig.description = bytes;
+  // Add description if present (required for AVC)
+  if (videoRendition.description) {
+    const base64 = videoRendition.description;
+    const binaryString = Buffer.from(base64, 'base64').toString('binary');
+    const bytes = new Uint8Array(binaryString.length);
+    for (let i = 0; i < binaryString.length; i++) {
+      bytes[i] = binaryString.charCodeAt(i);
     }
+    videoDecoderConfig.description = bytes;
+  }
 
-    console.log('Video decoder config ready');
+  console.log('Video decoder config ready');
 
-
-    setInterval(async function () {
-
+  try {
+    while (true) {
       const group = await videoTrack.nextGroup();
-      console.log("Next group");
-      console.log(group)
-      if (!group) return
+      if (!group) break;
+
       // First frame in group is always a keyframe
       let isKeyframe = true;
 
       // Read all frames in the group
-      for (; ;) {
+      for (;;) {
         const frameData = await group.readFrame();
         if (!frameData) break;
 
@@ -336,13 +330,10 @@ async function processVideoTrack(videoTrack) {
 
         isKeyframe = false; // Subsequent frames are delta
       }
-
-
-    }, 200)
-
-  });
-
-
+    }
+  } catch (error) {
+    console.error('Video processing error:', error);
+  }
 }
 
 /**
@@ -351,37 +342,31 @@ async function processVideoTrack(videoTrack) {
 async function processAudioTrack(audioTrack) {
   console.log('Processing audio track...');
 
+  const audioRendition = Object.values(catalog.audio.renditions)[0];
 
-  return new Promise(async function(resolve, reject) {
+  // Prepare decoderConfig for MediaBunny
+  audioDecoderConfig = {
+    codec: audioRendition.codec,
+    sampleRate: audioRendition.sampleRate,
+    numberOfChannels: audioRendition.numberOfChannels,
+  };
 
+  console.log('Audio decoder config ready');
 
-    const audioRendition = Object.values(catalog.audio.renditions)[0];
-
-    // Prepare decoderConfig for MediaBunny
-    audioDecoderConfig = {
-      codec: audioRendition.codec,
-      sampleRate: audioRendition.sampleRate,
-      numberOfChannels: audioRendition.numberOfChannels,
-    };
-
-    console.log('Audio decoder config ready');
-
-
-    setInterval(async function () {
-
+  try {
+    while (true) {
       const group = await audioTrack.nextGroup();
-
-      if (!group) return
+      if (!group) break;
 
       const frameData = await group.readFrame();
-      if (!frameData) return
+      if (!frameData) continue;
 
       const frame = parseAudioFrame(frameData);
       await handleAudioFrame(frame);
-
-    }, 200);
-
-  });
+    }
+  } catch (error) {
+    console.error('Audio processing error:', error);
+  }
 }
 
 /**
