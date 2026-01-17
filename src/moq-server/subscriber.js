@@ -90,25 +90,32 @@ async function getCatalog(broadcast) {
 async function startRecording(config) {
 
 
-  // Subscribe to tracks
-  const videoTrack = await broadcast.subscribe('video');
-
   const audioTrack = await broadcast.subscribe('audio');
 
-
-
-  processVideoTrack(videoTrack);
-
-  await new Promise((r)=>setTimeout(r, 20));
-
+  const videoTrack = await broadcast.subscribe('video');
 
 
 
 
   processAudioTrack(audioTrack)
 
+
+  //await new Promise((r) => setTimeout(r, 100));
+
+
+  // Subscribe to tracks
+
+
+
+
   console.log('Subscribed to video and audio tracks');
   console.log('Ready to record when publisher starts streaming');
+
+
+  processVideoTrack(videoTrack);
+
+
+  processAudioTrack(audioTrack)
 
 
 
@@ -271,7 +278,6 @@ async function processVideoTrack(videoTrack) {
 
   return new Promise(async function(resolve, reject) {
 
-    await new Promise(r => setTimeout(r, 200));
 
     const videoRendition = Object.values(catalog.video.renditions)[0];
 
@@ -335,7 +341,7 @@ async function processAudioTrack(audioTrack) {
 
   return new Promise(async function(resolve, reject) {
 
-    await new Promise((r)=>setTimeout(r, 200));
+
     const audioRendition = Object.values(catalog.audio.renditions)[0];
 
     // Prepare decoderConfig for MediaBunny
@@ -349,7 +355,10 @@ async function processAudioTrack(audioTrack) {
 
     try {
       while (true) {
+
+
         const group = await audioTrack.nextGroup();
+
         if (!group) break;
 
         const frameData = await group.readFrame();
