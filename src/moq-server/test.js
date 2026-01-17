@@ -1,7 +1,10 @@
 import { Input, ALL_FORMATS, BlobSource } from 'mediabunny';
-
-import { WebTransportPolyfill } from "@yomo/webtransport-polyfill";
 import WebSocket from 'ws';
+global.WebSocket = WebSocket;
+
+import { install } from "@moq/web-transport-ws"
+install(); // Polyfills globalThis.WebTransport in Node.js
+
 
 // Add global error handlers
 process.on('unhandledRejection', (reason, promise) => {
@@ -9,22 +12,18 @@ process.on('unhandledRejection', (reason, promise) => {
   console.error('Reason:', reason);
 });
 
-global.WebSocket = WebSocket;
-global.WebTransport = WebTransportPolyfill;
 
 import * as Moq from'@moq/lite'
 
 
 async function main(){
 
-    const RELAY_URL = 'http://localhost:4443'
+    const RELAY_URL = 'https://usc.cdn.moq.dev/anon'
 
     console.log(`Connecting to relay: ${RELAY_URL}`);
     try{
         // Disable WebSocket fallback to force WebTransport polyfill
-        const moqConnection = await Moq.Connection.connect(new URL(RELAY_URL), {
-            websocket: { enabled: false }
-        });
+        const moqConnection = await Moq.Connection.connect(new URL(RELAY_URL));
         console.log("Connected successfully!");
         console.log(moqConnection);
     } catch(e){
