@@ -225,7 +225,8 @@
 
   <script type="module">
     import * as Moq from 'https://esm.sh/@moq/lite';
-    import { MoqPublisher, getSampleRate, getBitrate, getCodecString } from 'https://cdn.jsdelivr.net/npm/webcodecs-examples@0.1.14/dist/index.js';
+    import { MoqPublisher } from './moq-publisher.js';
+    import { getSampleRate, getBitrate, getCodecString } from 'https://cdn.jsdelivr.net/npm/webcodecs-examples@0.1.14/dist/index.js';
 
     // UI Elements
     const publisherStatus = document.getElementById('publisherStatus');
@@ -383,6 +384,7 @@
               group.close();
               log('Sent catalog to server', 'success');
               updateServerStatus('Server connected', 'success');
+              break
             }
           }
         })();

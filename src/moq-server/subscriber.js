@@ -14,7 +14,15 @@ const __dirname = dirname(__filename);
 
 const app = express();
 app.use(express.json());
-app.use(express.static(join(__dirname, 'public')));
+
+// Serve TypeScript files as JavaScript modules
+app.use(express.static(join(__dirname, 'public'), {
+  setHeaders: (res, path) => {
+    if (path.endsWith('.ts')) {
+      res.setHeader('Content-Type', 'application/javascript');
+    }
+  }
+}));
 
 const PORT = 3000;
 const RECORDINGS_DIR = join(__dirname, 'recordings');
@@ -90,9 +98,21 @@ async function getCatalog(broadcast) {
 async function startRecording(config) {
 
 
-  const audioTrack = await broadcast.subscribe('audio');
 
   const videoTrack = await broadcast.subscribe('video');
+
+
+  processVideoTrack(videoTrack);
+
+  await new Promise((r)=>setTimeout(r, 30));
+
+
+  const audioTrack = await broadcast.subscribe('audio');
+
+
+
+  console.log("Audio track", audioTrack)
+
 
 
 
@@ -112,10 +132,10 @@ async function startRecording(config) {
   console.log('Ready to record when publisher starts streaming');
 
 
-  processVideoTrack(videoTrack);
+  console.log("Video track", videoTrack)
 
 
-  processAudioTrack(audioTrack)
+
 
 
 
@@ -301,33 +321,31 @@ async function processVideoTrack(videoTrack) {
 
     console.log('Video decoder config ready');
 
-    try {
-      while (true) {
-        console.log("Waiting for next group")
-        const group = await videoTrack.nextGroup();
-        console.log("Next group");
-        console.log(group)
-        if (!group) break;
 
-        // First frame in group is always a keyframe
-        let isKeyframe = true;
+    setInterval(async function () {
 
-        // Read all frames in the group
-        for (;;) {
-          const frameData = await group.readFrame();
-          if (!frameData) break;
+      const group = await videoTrack.nextGroup();
+      console.log("Next group");
+      console.log(group)
+      if (!group) return
+      // First frame in group is always a keyframe
+      let isKeyframe = true;
 
-          const frame = parseVideoFrame(frameData, isKeyframe);
-          await handleVideoFrame(frame, isKeyframe);
+      // Read all frames in the group
+      for (; ;) {
+        const frameData = await group.readFrame();
+        if (!frameData) break;
 
-          isKeyframe = false; // Subsequent frames are delta
-        }
+        const frame = parseVideoFrame(frameData, isKeyframe);
+        await handleVideoFrame(frame, isKeyframe);
+
+        isKeyframe = false; // Subsequent frames are delta
       }
-    } catch (error) {
-      console.error('Video processing error:', error);
-    }
 
-  })
+
+    }, 200)
+
+  });
 
 
 }
@@ -353,26 +371,22 @@ async function processAudioTrack(audioTrack) {
 
     console.log('Audio decoder config ready');
 
-    try {
-      while (true) {
 
+    setInterval(async function () {
 
-        const group = await audioTrack.nextGroup();
+      const group = await audioTrack.nextGroup();
 
-        if (!group) break;
+      if (!group) return
 
-        const frameData = await group.readFrame();
-        if (!frameData) continue;
+      const frameData = await group.readFrame();
+      if (!frameData) return
 
-        const frame = parseAudioFrame(frameData);
-        await handleAudioFrame(frame);
-      }
-    } catch (error) {
-      console.error('Audio processing error:', error);
-    }
+      const frame = parseAudioFrame(frameData);
+      await handleAudioFrame(frame);
 
-  })
+    }, 200);
 
+  });
 }
 
 /**

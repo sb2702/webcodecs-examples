@@ -1,32 +1,21 @@
-import { MediaStreamTrackProcessor, getSampleRate } from 'webcodecs-utils';
-import { VideoEncoderStream } from './video-encoder-stream';
-import { AudioEncoderStream } from './audio-encoder-stream';
+import { VideoEncoderStream } from './video-encoder-stream.js';
+import { AudioEncoderStream } from './audio-encoder-stream.js';
 
 export class MoqPublisher {
-  private videoTrack: MediaStreamTrack;
-  private audioTrack: MediaStreamTrack;
-  private broadcast: any;
-  private videoConfig: VideoEncoderConfig;
-  private audioConfig: AudioEncoderConfig;
-  private videoMoqTrack: any = null;
-  private audioMoqTrack: any = null;
-  private abortController: AbortController | null = null;
-
-  constructor(
-    videoTrack: MediaStreamTrack,
-    audioTrack: MediaStreamTrack,
-    broadcast: any,
-    videoConfig: VideoEncoderConfig,
-    audioConfig: AudioEncoderConfig
-  ) {
+  constructor(videoTrack, audioTrack, broadcast, videoConfig, audioConfig) {
     this.videoTrack = videoTrack;
     this.audioTrack = audioTrack;
     this.broadcast = broadcast;
     this.videoConfig = videoConfig;
     this.audioConfig = audioConfig;
+    this.videoMoqTrack = null;
+    this.audioMoqTrack = null;
+    this.abortController = null;
+    this.videoFrameCount = 0;
+    this.audioFrameCount = 0;
   }
 
-  static async getDescription(videoTrack: MediaStreamTrack, config: VideoEncoderConfig): Promise<string> {
+  static async getDescription(videoTrack, config) {
     const processor = new MediaStreamTrackProcessor({ track: videoTrack });
     const reader = processor.readable.getReader();
 
@@ -65,32 +54,32 @@ export class MoqPublisher {
     });
   }
 
-  async start(): Promise<void> {
+  async start() {
     if (this.abortController) {
       throw new Error('Already publishing');
     }
 
     this.abortController = new AbortController();
-    
+
     for(;;){ // Listen for track requests
       const trackRequest = this.broadcast.requested();
+
+
       if(trackRequest) this.handleTrackRequest(trackRequest)
+
+
+      if(this.videoMoqTrack && this.audioMoqTrack) break
       await new Promise((r)=>requestAnimationFrame(r));
     }
-
-  
   }
 
   async handleTrackRequest(trackRequestPromise){
-
     const trackRequest = await trackRequestPromise;
     const requestedTrack = trackRequest.track;
 
     console.log("Handling track request", requestedTrack)
     if (requestedTrack.name === 'video' && !this.videoMoqTrack) {
-
       this.videoMoqTrack = requestedTrack;
-
 
       // Video pipeline
       const videoProcessor = new MediaStreamTrackProcessor({ track: this.videoTrack });
@@ -105,10 +94,9 @@ export class MoqPublisher {
     } else if (requestedTrack.name === 'audio' && !this.audioMoqTrack) {
       this.audioMoqTrack = requestedTrack;
 
-          // Audio pipeline
-    const audioProcessor = new MediaStreamTrackProcessor({ track: this.audioTrack });
-    const audioEncoderStream = new AudioEncoderStream(this.audioConfig);
-
+      // Audio pipeline
+      const audioProcessor = new MediaStreamTrackProcessor({ track: this.audioTrack });
+      const audioEncoderStream = new AudioEncoderStream(this.audioConfig);
 
       // Start audio pipeline
       audioProcessor.readable
@@ -117,13 +105,11 @@ export class MoqPublisher {
           signal: this.abortController.signal
         });
     }
-
-
-
   }
 
-  private createVideoWriter(moqTrack: any): WritableStream<{ chunk: EncodedVideoChunk; meta: EncodedVideoChunkMetadata }> {
-    let currentGroup: any = null;
+  createVideoWriter(moqTrack) {
+    let currentGroup = null;
+    const self = this;
 
     return new WritableStream({
       async write(value) {
@@ -140,7 +126,7 @@ export class MoqPublisher {
           currentGroup = moqTrack.appendGroup();
         }
 
-        // Hang format: [timestamp (8 bytes)] [data]
+        // Format: [timestamp (8 bytes)] [data]
         const chunkData = new Uint8Array(value.chunk.byteLength);
         value.chunk.copyTo(chunkData);
 
@@ -154,6 +140,7 @@ export class MoqPublisher {
         buffer.set(chunkData, 8);
 
         currentGroup.writeFrame(buffer);
+        self.videoFrameCount++;
       },
       async close() {
         if (currentGroup) {
@@ -163,12 +150,14 @@ export class MoqPublisher {
     });
   }
 
-  private createAudioWriter(moqTrack: any): WritableStream<EncodedAudioChunk> {
+  createAudioWriter(moqTrack) {
+    const self = this;
+
     return new WritableStream({
       async write(chunk) {
         const group = moqTrack.appendGroup();
 
-        // Hang format: [timestamp (8 bytes)] [data]
+        // Format: [timestamp (8 bytes)] [data]
         const chunkData = new Uint8Array(chunk.byteLength);
         chunk.copyTo(chunkData);
 
@@ -183,18 +172,19 @@ export class MoqPublisher {
 
         group.writeFrame(buffer);
         group.close();
+        self.audioFrameCount++;
       }
     });
   }
 
-  stop(): void {
+  stop() {
     if (this.abortController) {
       this.abortController.abort();
       this.abortController = null;
     }
   }
 
-  isPublishing(): boolean {
+  isPublishing() {
     return this.abortController !== null;
   }
 }
