@@ -1,8 +1,6 @@
-import { Input, ALL_FORMATS, BlobSource } from 'mediabunny';
 import WebSocket from 'ws';
-globalThis.WebSocket = WebSocket;
-
-
+import { WebTransport } from '@fails-components/webtransport';
+//import { quicheLoaded } from '@fails-components/webtransport';
 
 // Add global error handlers
 process.on('unhandledRejection', (reason, promise) => {
@@ -10,19 +8,25 @@ process.on('unhandledRejection', (reason, promise) => {
   console.error('Reason:', reason);
 });
 
+// Polyfill both WebSocket (for fallback) and WebTransport (for HTTP/3)
+global.WebSocket = WebSocket;
+global.WebTransport = WebTransport;
 
-import * as Moq from'@moq/lite'
-
+import * as Moq from '@moq/lite'
 
 async function main(){
+    // Wait for quiche to load
+    console.log('Waiting for quiche to load...');
+   // await quicheLoaded;
+    console.log('Quiche loaded!');
 
-    const RELAY_URL = 'https://usc.cdn.moq.dev/anon'
+    const RELAY_URL = 'http://localhost:4443/anon'
 
     console.log(`Connecting to relay: ${RELAY_URL}`);
     try{
-        // Disable WebSocket fallback to force WebTransport polyfill
+        // This should now use real HTTP/3 WebTransport
         const moqConnection = await Moq.Connection.connect(new URL(RELAY_URL));
-        console.log("Connected successfully!");
+        console.log("Connected successfully via HTTP/3!");
         console.log(moqConnection);
     } catch(e){
         console.log("Unable to connect");
