@@ -102,19 +102,14 @@ async function startRecording(config) {
   const videoTrack = await broadcast.subscribe('video');
 
 
-  processVideoTrack(videoTrack);
-
-  await new Promise((r)=>setTimeout(r, 30));
-
 
   const audioTrack = await broadcast.subscribe('audio');
 
 
 
-  console.log("Audio track", audioTrack)
 
 
-
+  processVideoTrack(videoTrack);
 
 
   processAudioTrack(audioTrack)
