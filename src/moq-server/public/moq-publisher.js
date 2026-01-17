@@ -179,8 +179,14 @@ export class MoqPublisher {
 
   stop() {
     if (this.abortController) {
-      this.abortController.abort();
-      this.abortController = null;
+      
+      try{
+        this.abortController.abort();
+        this.abortController = null;
+      } catch (e) {
+        
+      }
+
     }
   }
 
