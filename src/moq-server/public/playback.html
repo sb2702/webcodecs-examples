@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MoQ Playback</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      margin: 0;
+      padding: 20px;
+      background-color: #f8f9fa;
+    }
+
+    .container {
+      max-width: 800px;
+      margin: 0 auto;
+    }
+
+    h2 {
+      margin: 0 0 20px 0;
+      color: #2d3748;
+    }
+
+    .status {
+      padding: 12px;
+      margin: 15px 0;
+      border-radius: 4px;
+      border: 1px solid #e2e8f0;
+      background: #f7fafc;
+      font-size: 14px;
+      font-weight: 500;
+    }
+
+    .status.connected {
+      background: #c6f6d5;
+      border-color: #9ae6b4;
+      color: #22543d;
+    }
+
+    .status.error {
+      background: #fed7d7;
+      border-color: #fc8181;
+      color: #742a2a;
+    }
+
+    .log {
+      background: #1a202c;
+      color: #e2e8f0;
+      padding: 15px;
+      border-radius: 4px;
+      max-height: 300px;
+      overflow-y: auto;
+      font-family: 'Monaco', 'Courier New', monospace;
+      font-size: 12px;
+      margin-top: 15px;
+    }
+
+    .log-entry {
+      margin: 4px 0;
+      padding: 4px;
+      border-left: 3px solid transparent;
+      padding-left: 10px;
+    }
+
+    .log-entry.info { border-left-color: #4299e1; }
+    .log-entry.success { border-left-color: #48bb78; }
+    .log-entry.error { border-left-color: #f56565; }
+
+    .log-entry .timestamp {
+      color: #a0aec0;
+      margin-right: 10px;
+      font-size: 11px;
+    }
+
+    pre {
+      background: #2d3748;
+      color: #e2e8f0;
+      padding: 15px;
+      border-radius: 4px;
+      overflow-x: auto;
+      font-size: 12px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h2>📥 MoQ Playback Client</h2>
+    <div id="status" class="status">Initializing...</div>
+
+    <div id="catalogDisplay"></div>
+    <div class="log" id="log"></div>
+  </div>
+
+  <script type="module">
+    import * as Moq from 'https://esm.sh/@moq/lite';
+
+    const RELAY_URL = 'https://usc.cdn.moq.dev/anon';
+    const BROADCAST_NAME = 'file-playback';
+
+    const statusEl = document.getElementById('status');
+    const logEl = document.getElementById('log');
+    const catalogDisplayEl = document.getElementById('catalogDisplay');
+
+    function log(message, type = 'info') {
+      const entry = document.createElement('div');
+      entry.className = `log-entry ${type}`;
+      const timestamp = new Date().toLocaleTimeString();
+      entry.innerHTML = `<span class="timestamp">[${timestamp}]</span>${message}`;
+      logEl.appendChild(entry);
+      logEl.scrollTop = logEl.scrollHeight;
+      console.log(`[${type.toUpperCase()}] ${message}`);
+    }
+
+    function updateStatus(message, type = 'info') {
+      statusEl.textContent = message;
+      statusEl.className = 'status';
+      if (type === 'success') statusEl.className = 'status connected';
+      if (type === 'error') statusEl.className = 'status error';
+    }
+
+    async function getCatalog(broadcast) {
+      try {
+        const catalogTrack = broadcast.subscribe('catalog.json');
+        log('Subscribed to catalog.json track', 'info');
+
+        for (;;) {
+          const catalogGroup = await catalogTrack.nextGroup();
+
+          if (catalogGroup) {
+            const catalogJson = await catalogGroup.readString();
+            const catalog = JSON.parse(catalogJson);
+            log('Received catalog!', 'success');
+            console.log('Catalog:', catalog);
+
+            // Display catalog
+            catalogDisplayEl.innerHTML = '<h3>Received Catalog:</h3><pre>' +
+              JSON.stringify(catalog, null, 2) + '</pre>';
+
+            return catalog;
+          }
+        }
+      } catch (e) {
+        log('Error getting catalog: ' + e.message, 'error');
+        await new Promise((r) => setTimeout(r, 500));
+        return await getCatalog(broadcast);
+      }
+    }
+
+    async function init() {
+      try {
+        updateStatus('Connecting to relay...', 'info');
+        log('Connecting to relay: ' + RELAY_URL, 'info');
+
+        const connection = await Moq.Connection.connect(new URL(RELAY_URL));
+        log('Connected to relay', 'success');
+
+        const broadcast = connection.consume(BROADCAST_NAME);
+        log('Consuming broadcast: ' + BROADCAST_NAME, 'info');
+
+        updateStatus('Requesting catalog...', 'info');
+        const catalog = await getCatalog(broadcast);
+
+        updateStatus('Catalog received!', 'success');
+        log('Catalog exchange complete', 'success');
+
+      } catch (error) {
+        updateStatus('Connection failed', 'error');
+        log('Error: ' + error.message, 'error');
+        console.error(error);
+      }
+    }
+
+    // Initialize
+    init();
+  </script>
+</body>
+</html>
