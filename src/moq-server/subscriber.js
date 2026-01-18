@@ -1,13 +1,10 @@
 import express from 'express';
-import WebSocket from 'ws';
 import * as Moq from '@moq/lite';
 import { Output, EncodedPacket, EncodedVideoPacketSource, EncodedAudioPacketSource, FilePathTarget, Mp4OutputFormat } from 'mediabunny';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import fs from 'fs';
 
-// Polyfill WebSocket for MoQ
-globalThis.WebSocket = WebSocket;
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
