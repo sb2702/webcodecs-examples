@@ -79,6 +79,10 @@ async function loadVideoFile() {
 }
 
 async function startMoqPublisher() {
+  if (!catalogData) {
+    throw new Error('Catalog not loaded - call loadVideoFile() first');
+  }
+
   console.log('Connecting to relay:', RELAY_URL);
   const connection = await Moq.Connection.connect(new URL(RELAY_URL));
   console.log('Connected to relay');
@@ -87,7 +91,7 @@ async function startMoqPublisher() {
   connection.publish(BROADCAST_NAME, broadcast);
   console.log('Publishing broadcast:', BROADCAST_NAME);
 
-  // Listen for catalog requests
+  // Listen for track requests
   (async () => {
     while (true) {
       const trackRequest = await broadcast.requested();
@@ -100,7 +104,13 @@ async function startMoqPublisher() {
         const group = requestedTrack.appendGroup();
         group.writeString(catalogJson);
         group.close();
-        console.log('Sent catalog');
+        console.log('Sent catalog with decoder configs from video file');
+      } else if (requestedTrack.name === 'video') {
+        console.log('Video track requested (not sending data yet)');
+        // TODO: Stream video data
+      } else if (requestedTrack.name === 'audio') {
+        console.log('Audio track requested (not sending data yet)');
+        // TODO: Stream audio data
       }
     }
   })();

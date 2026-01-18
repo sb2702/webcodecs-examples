@@ -88,6 +88,8 @@
     <h2>📥 MoQ Playback Client</h2>
     <div id="status" class="status">Initializing...</div>
 
+    <button id="startStreamBtn" disabled style="margin: 15px 0; padding: 10px 20px; background: #3182ce; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">Start Streaming</button>
+
     <div id="catalogDisplay"></div>
     <div class="log" id="log"></div>
   </div>
@@ -101,6 +103,10 @@
     const statusEl = document.getElementById('status');
     const logEl = document.getElementById('log');
     const catalogDisplayEl = document.getElementById('catalogDisplay');
+    const startStreamBtn = document.getElementById('startStreamBtn');
+
+    let broadcast = null;
+    let catalog = null;
 
     function log(message, type = 'info') {
       const entry = document.createElement('div');
@@ -147,6 +153,18 @@
       }
     }
 
+    async function startStreaming() {
+      log('Subscribing to video track...', 'info');
+      const videoTrack = await broadcast.subscribe('video');
+      log('Subscribed to video track', 'success');
+
+      log('Subscribing to audio track...', 'info');
+      const audioTrack = await broadcast.subscribe('audio');
+      log('Subscribed to audio track', 'success');
+
+      updateStatus('Subscribed to tracks (not reading data yet)', 'success');
+    }
+
     async function init() {
       try {
         updateStatus('Connecting to relay...', 'info');
@@ -155,14 +173,17 @@
         const connection = await Moq.Connection.connect(new URL(RELAY_URL));
         log('Connected to relay', 'success');
 
-        const broadcast = connection.consume(BROADCAST_NAME);
+        broadcast = connection.consume(BROADCAST_NAME);
         log('Consuming broadcast: ' + BROADCAST_NAME, 'info');
 
         updateStatus('Requesting catalog...', 'info');
-        const catalog = await getCatalog(broadcast);
+        catalog = await getCatalog(broadcast);
 
-        updateStatus('Catalog received!', 'success');
+        updateStatus('Catalog received! Click "Start Streaming" to begin', 'success');
         log('Catalog exchange complete', 'success');
+
+        // Enable the start button
+        startStreamBtn.disabled = false;
 
       } catch (error) {
         updateStatus('Connection failed', 'error');
@@ -170,6 +191,9 @@
         console.error(error);
       }
     }
+
+    // Event listeners
+    startStreamBtn.addEventListener('click', startStreaming);
 
     // Initialize
     init();
