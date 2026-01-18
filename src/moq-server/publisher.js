@@ -49,6 +49,7 @@ async function loadVideoFile() {
     videoDecoderConfig.description = Buffer.from(description).toString('base64');
   }
 
+
   if (audioDecoderConfig.description) {
     const description = new Uint8Array(audioDecoderConfig.description);
     audioDecoderConfig.description = Buffer.from(description).toString('base64');
