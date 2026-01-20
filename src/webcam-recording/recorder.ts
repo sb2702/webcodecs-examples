@@ -65,7 +65,8 @@ export class WebcamRecorder {
     const videoEncoderStream = new VideoEncoderStream(
       videoSettings.width!,
       videoSettings.height!,
-      videoSettings.frameRate || 30
+      videoSettings.frameRate || 30,
+      'avc'
     );
 
     // Audio pipeline
