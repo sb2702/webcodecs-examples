@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Hang Interop Check</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      margin: 0;
+      padding: 20px;
+      background: #f7fafc;
+      color: #2d3748;
+    }
+
+    h1 { font-size: 20px; margin: 0 0 6px; }
+    h2 { font-size: 15px; margin: 0 0 10px; }
+    p { font-size: 13px; color: #4a5568; margin: 0 0 16px; }
+    code { background: #edf2f7; padding: 1px 4px; border-radius: 3px; }
+
+    .row {
+      display: flex;
+      gap: 15px;
+      margin-bottom: 24px;
+    }
+
+    .panel {
+      flex: 1;
+      min-width: 0;
+      background: #fff;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      padding: 12px;
+    }
+
+    iframe {
+      width: 100%;
+      height: 520px;
+      border: none;
+    }
+
+    moq-watch canvas, moq-publish video {
+      width: 100%;
+      background: #000;
+      border-radius: 4px;
+    }
+
+    @media (max-width: 800px) {
+      .row { flex-direction: column; }
+    }
+  </style>
+</head>
+<body>
+  <h1>Hang interop check</h1>
+  <p>
+    Checks the hand-written WebCodecs implementation against the MoQ team's reference players, in both directions.
+    Relay: <code id="relayLabel"></code>
+  </p>
+
+  <h2>1. Our publisher → reference <code>&lt;moq-watch&gt;</code></h2>
+  <p>Start the webcam and publishing on the left; the reference player on the right should show the stream.</p>
+  <div class="row">
+    <div class="panel"><iframe id="ourPublisher" allow="camera; microphone"></iframe></div>
+    <div class="panel" id="watchPanel"></div>
+  </div>
+
+  <h2>2. Reference <code>&lt;moq-publish&gt;</code> → our subscriber</h2>
+  <p>The reference publisher on the left uses your camera; our subscriber on the right should decode it.</p>
+  <div class="row">
+    <div class="panel" id="publishPanel"></div>
+    <div class="panel"><iframe id="ourSubscriber"></iframe></div>
+  </div>
+
+  <script type="module">
+    import 'https://esm.sh/@moq/watch@0.6.2/element';
+    import 'https://esm.sh/@moq/publish@0.5.2/element';
+
+    const params = new URLSearchParams(window.location.search);
+    const relay = params.get('relay') || 'https://cdn.moq.dev/anon';
+    const id = Math.floor(Math.random() * 100000);
+    const ours = `interop-ours-${id}.hang`;
+    const theirs = `interop-theirs-${id}.hang`;
+
+    document.getElementById('relayLabel').textContent = relay;
+
+    // 1. Our publisher, watched by the reference player
+    document.getElementById('ourPublisher').src =
+      `../browser-to-browser/publisher.html?relay=${encodeURIComponent(relay)}&broadcast=${encodeURIComponent(ours)}`;
+
+    const watch = document.createElement('moq-watch');
+    watch.setAttribute('url', relay);
+    watch.setAttribute('name', ours);
+    watch.appendChild(document.createElement('canvas'));
+    document.getElementById('watchPanel').append(`Watching ${ours}`, watch);
+
+    // 2. The reference publisher, watched by our subscriber
+    const publish = document.createElement('moq-publish');
+    publish.setAttribute('url', relay);
+    publish.setAttribute('name', theirs);
+    publish.setAttribute('source', 'camera');
+    const preview = document.createElement('video');
+    preview.muted = true;
+    preview.autoplay = true;
+    publish.appendChild(preview);
+    document.getElementById('publishPanel').append(`Publishing ${theirs}`, publish);
+
+    document.getElementById('ourSubscriber').src =
+      `../browser-to-browser/subscriber.html?relay=${encodeURIComponent(relay)}&broadcast=${encodeURIComponent(theirs)}`;
+
+    console.log('[interop] ours:', ours, 'theirs:', theirs);
+  </script>
+</body>
+</html>

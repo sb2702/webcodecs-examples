@@ -8,7 +8,9 @@ export { transcodePipeline } from './transcoding/transcode-pipeline';
 
 export { WebcamRecorder, getWebcam } from './webcam-recording/index';
 
-export { MoqPublisher } from './moq/moq-publisher';
+export { MoqPublisher, VIDEO_TRACK, AUDIO_TRACK } from './moq/moq-publisher';
+export * as Hang from './moq/hang';
+export { createVideoWriter, createAudioWriter } from './moq/hang-writers';
 export { MoqSubscriber } from './moq/moq-subscriber';
 export { AudioPlayer } from './moq/audio-player';
 export type { MoqFrame } from './moq/moq-subscriber';

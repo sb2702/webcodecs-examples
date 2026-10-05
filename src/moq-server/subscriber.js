@@ -1,5 +1,7 @@
 import express from 'express';
 import * as Moq from '@moq/net';
+// The same hand-written Hang helpers the browser demos use (Node strips the TypeScript types)
+import * as Hang from '../moq/hang.ts';
 import { Output, EncodedPacket, EncodedVideoPacketSource, EncodedAudioPacketSource, FilePathTarget, Mp4OutputFormat } from 'mediabunny';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
@@ -13,6 +15,9 @@ const app = express();
 app.use(express.json());
 
 // Serve TypeScript files as JavaScript modules
+// Serve the repo's own library build at /lib for upload.html?local
+app.use('/lib', express.static(join(__dirname, '../../dist')));
+
 app.use(express.static(join(__dirname, 'public'), {
   setHeaders: (res, path) => {
     if (path.endsWith('.ts')) {
@@ -21,10 +26,10 @@ app.use(express.static(join(__dirname, 'public'), {
   }
 }));
 
-const PORT = 3000;
+const PORT = Number(process.env.PORT) || 3000;
 const RECORDINGS_DIR = join(__dirname, 'recordings');
 const RELAY_URL = 'https://cdn.moq.dev/anon';
-const BROADCAST_NAME = 'server-recording';
+const BROADCAST_NAME = Hang.broadcastName(process.env.BROADCAST || 'server-recording');
 
 // Ensure recordings directory exists
 if (!fs.existsSync(RECORDINGS_DIR)) {
@@ -42,37 +47,16 @@ let catalog = null;
 let broadcast = null;
 
 /**
- * Parse video frame from MoQ format: [timestamp (8 bytes)] [data]
+ * Read the next frame of a group, or undefined when the group ends.
+ * A live group can be reset mid-stream (e.g. dropped by the relay): skip to the next group.
  */
-function parseVideoFrame(buffer, isKeyframe) {
-  const view = new DataView(buffer.buffer, buffer.byteOffset);
-  const timestamp = Number(view.getBigUint64(0, true));
-  const type = isKeyframe ? 'key' : 'delta';
-  const data = buffer.slice(8);
-
-  return { timestamp, type, data };
-}
-
-/**
- * Parse audio frame from MoQ format: [timestamp (8 bytes)] [data]
- */
-function parseAudioFrame(buffer) {
-  const view = new DataView(buffer.buffer, buffer.byteOffset);
-  const timestamp = Number(view.getBigUint64(0, true));
-  const data = buffer.slice(8);
-
-  return { timestamp, data };
-}
-
-/**
- * Resolves once the browser has announced the broadcast on the relay. Without
- * `announced: true` the request resolves blindly, and subscribing before the
- * publisher announces is reset with code 54 (Unroutable)
- */
-async function waitForBroadcast(request) {
-  let active = request.active.peek();
-  while (!active) active = await request.active.changed();
-  return active;
+async function readFrame(group) {
+  try {
+    return await group.readFrame();
+  } catch (error) {
+    console.warn(`Group ${group.sequence} reset, skipping to the next group:`, error.message);
+    return undefined;
+  }
 }
 
 /**
@@ -81,7 +65,7 @@ async function waitForBroadcast(request) {
 async function getCatalog(broadcast) {
   try {
     console.log('Requesting catalog...');
-    const catalogTrack = broadcast.track('catalog.json').subscribe();
+    const catalogTrack = broadcast.track(Hang.CATALOG_TRACK).subscribe({ priority: Hang.PRIORITY.catalog });
     const catalogGroup = await catalogTrack.recvGroup();
     const catalogData = await catalogGroup.readJson();
     console.log('Received catalog');
@@ -100,11 +84,12 @@ async function startRecording(config) {
 
 
 
-  const videoTrack = broadcast.track('video').subscribe();
-
-
-
-  const audioTrack = broadcast.track('audio').subscribe();
+  // Subscribe using the track names the catalog lists
+  const [videoName] = Hang.firstRendition(catalog.video?.renditions);
+  const [audioName] = Hang.firstRendition(catalog.audio?.renditions);
+  // A recorder wants every group in full, not just the live edge, so ask for the retention window
+  const videoTrack = broadcast.track(videoName).subscribe({ priority: Hang.PRIORITY.video, maxAge: Hang.MEDIA_MAX_AGE_MS });
+  const audioTrack = broadcast.track(audioName).subscribe({ priority: Hang.PRIORITY.audio, maxAge: Hang.MEDIA_MAX_AGE_MS });
 
 
 
@@ -207,6 +192,7 @@ async function stopRecording() {
   return { outputPath };
 }
 
+// #region mux-video
 /**
  * Handle incoming video frame
  */
@@ -245,7 +231,8 @@ async function handleVideoFrame(frame, isKeyframe) {
   } catch (error) {
     console.error('Error handling video frame:', error);
   }
-}
+}// #endregion mux-video
+
 
 /**
  * Handle incoming audio frame
@@ -280,31 +267,17 @@ async function handleAudioFrame(frame) {
   }
 }
 
+// #region read-video
 /**
  * Process video track from MoQ
  */
 async function processVideoTrack(videoTrack) {
   console.log('Processing video track...');
 
-  const videoRendition = Object.values(catalog.video.renditions)[0];
+  const [, videoRendition] = Hang.firstRendition(catalog.video.renditions);
 
-  // Prepare decoderConfig for MediaBunny
-  videoDecoderConfig = {
-    codec: videoRendition.codec,
-    codedWidth: videoRendition.codedWidth,
-    codedHeight: videoRendition.codedHeight,
-  };
-
-  // Add description if present (required for AVC)
-  if (videoRendition.description) {
-    const base64 = videoRendition.description;
-    const binaryString = Buffer.from(base64, 'base64').toString('binary');
-    const bytes = new Uint8Array(binaryString.length);
-    for (let i = 0; i < binaryString.length; i++) {
-      bytes[i] = binaryString.charCodeAt(i);
-    }
-    videoDecoderConfig.description = bytes;
-  }
+  // Prepare decoderConfig for MediaBunny (the catalog's description is hex)
+  videoDecoderConfig = Hang.videoDecoderConfig(videoRendition);
 
   console.log('Video decoder config ready');
 
@@ -318,10 +291,16 @@ async function processVideoTrack(videoTrack) {
 
       // Read all frames in the group
       for (;;) {
-        const moqFrame = await group.readFrame();
+        const moqFrame = await readFrame(group);
         if (!moqFrame) break;
 
-        const frame = parseVideoFrame(moqFrame.payload, isKeyframe);
+        // Hang legacy container: [timestamp varint (microseconds)] [codec payload]
+        const { timestamp, data } = Hang.decodeFrame(moqFrame.payload);
+
+        // An empty payload marks where the previous frame ends: it's not media
+        if (data.byteLength === 0) continue;
+
+        const frame = { timestamp, data, type: isKeyframe ? 'key' : 'delta' };
         await handleVideoFrame(frame, isKeyframe);
 
         isKeyframe = false; // Subsequent frames are delta
@@ -330,7 +309,8 @@ async function processVideoTrack(videoTrack) {
   } catch (error) {
     console.error('Video processing error:', error);
   }
-}
+}// #endregion read-video
+
 
 /**
  * Process audio track from MoQ
@@ -338,14 +318,10 @@ async function processVideoTrack(videoTrack) {
 async function processAudioTrack(audioTrack) {
   console.log('Processing audio track...');
 
-  const audioRendition = Object.values(catalog.audio.renditions)[0];
+  const [, audioRendition] = Hang.firstRendition(catalog.audio.renditions);
 
   // Prepare decoderConfig for MediaBunny
-  audioDecoderConfig = {
-    codec: audioRendition.codec,
-    sampleRate: audioRendition.sampleRate,
-    numberOfChannels: audioRendition.numberOfChannels,
-  };
+  audioDecoderConfig = Hang.audioDecoderConfig(audioRendition);
 
   console.log('Audio decoder config ready');
 
@@ -354,14 +330,39 @@ async function processAudioTrack(audioTrack) {
       const group = await audioTrack.recvGroup();
       if (!group) break;
 
-      const moqFrame = await group.readFrame();
-      if (!moqFrame) continue;
+      // Every audio frame is a keyframe, and a group may hold one or many of them
+      for (;;) {
+        const moqFrame = await readFrame(group);
+        if (!moqFrame) break;
 
-      const frame = parseAudioFrame(moqFrame.payload);
-      await handleAudioFrame(frame);
+        const { timestamp, data } = Hang.decodeFrame(moqFrame.payload);
+        if (data.byteLength === 0) continue; // end-of-audio marker, not media
+
+        await handleAudioFrame({ timestamp, data });
+      }
     }
   } catch (error) {
     console.error('Audio processing error:', error);
+  }
+}
+
+/**
+ * Track the announced broadcast, fetching its catalog each time a publisher (re)announces it
+ */
+async function followBroadcast(request) {
+  let active = request.active.peek();
+  for (;;) {
+    if (active) {
+      broadcast = active;
+      console.log(`Consuming broadcast: ${BROADCAST_NAME}`);
+      catalog = await getCatalog(active);
+      console.log('Catalog received, waiting for publisher to start streaming...');
+    } else if (broadcast) {
+      console.log('Broadcast ended');
+      broadcast = null;
+      catalog = null;
+    }
+    active = await request.active.changed();
   }
 }
 
@@ -375,14 +376,10 @@ async function connectToMoQ() {
     moqConnection = await Moq.Connection.connect({ url: new URL(RELAY_URL), consume: origin });
     console.log('Connected to MoQ relay');
 
-    // Wait for the browser to announce the broadcast
+    // Follow the broadcast as it comes and goes: a reloaded browser announces a fresh one,
+    // and subscriptions to an unannounced broadcast should be dropped
     console.log(`Waiting for broadcast: ${BROADCAST_NAME}`);
-    broadcast = await waitForBroadcast(origin.request(Moq.Path.from(BROADCAST_NAME), { announced: true }));
-    console.log(`Consuming broadcast: ${BROADCAST_NAME}`);
-
-    // Get catalog
-    catalog = await getCatalog(broadcast);
-    console.log('Catalog received, waiting for publisher to start streaming...');
+    followBroadcast(origin.request(Moq.Path.from(BROADCAST_NAME), { announced: true }));
 
   } catch (error) {
     console.error('MoQ connection error:', error);

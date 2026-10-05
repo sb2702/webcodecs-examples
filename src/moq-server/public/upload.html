@@ -225,8 +225,11 @@
 
   <script type="module">
     import * as Moq from 'https://esm.sh/@moq/net@0.4.2';
-    import { MoqPublisher } from './moq-publisher.js';
-    import { getSampleRate, getBitrate, getCodecString } from 'https://cdn.jsdelivr.net/npm/webcodecs-examples@0.1.14/dist/index.js';
+    // Load the published library, or this repo's own build with ?local (run `npm run build` at the repo root first)
+    const LIB = new URLSearchParams(location.search).has('local')
+      ? '/lib/index.js'
+      : 'https://cdn.jsdelivr.net/npm/webcodecs-examples@0.1.18/dist/index.js';
+    const { MoqPublisher, Hang, getSampleRate, getBitrate, getCodecString } = await import(LIB);
 
     // UI Elements
     const publisherStatus = document.getElementById('publisherStatus');
@@ -252,7 +255,7 @@
     let statsInterval = null;
 
     const RELAY_URL = 'https://cdn.moq.dev/anon';
-    const BROADCAST_NAME = 'server-recording';
+    const BROADCAST_NAME = Hang.broadcastName('server-recording');
 
     function log(message, type = 'info') {
       const entry = document.createElement('div');
@@ -350,44 +353,19 @@
         // Get description using the same config
         const description = await MoqPublisher.getDescription(videoTrack, videoConfig);
 
-        const catalogData = {
-          video: {
-            renditions: {
-              video0: {
-                codec: codecString,
-                codedWidth: videoSettings.width,
-                codedHeight: videoSettings.height,
-                description
-              }
-            },
-            priority: 1
-          },
-          audio: {
-            renditions: {
-              audio0: audioConfig
-            },
-            priority: 2
-          }
-        };
-
-        // Publish the catalog as a single group, retained for an hour so the server can fetch it any time
-        const catalogTrack = broadcast.createTrack('catalog.json', { maxAge: Moq.Time.Milli(60 * 60 * 1000) });
-        const catalogGroup = catalogTrack.appendGroup();
-        catalogGroup.writeJson(catalogData);
-        catalogGroup.close();
+        // Creates the catalog, video and audio tracks now; encoding starts on publisher.start()
+        const toTimestamp = (micros) => Moq.Time.Timestamp.fromMicros(micros);
+        publisher = new MoqPublisher(videoTrack, audioTrack, broadcast, videoConfig, audioConfig, toTimestamp);
+        publisher.publishCatalog(description);
         log('Published catalog', 'success');
 
         // The server subscribing to the catalog is our signal that it's connected
-        catalogTrack.used.subscribe((used) => {
+        publisher.catalogMoqTrack.used.subscribe((used) => {
           if (used) {
             log('Server subscribed to catalog', 'success');
             updateServerStatus('Server connected', 'success');
           }
         });
-
-        // Creates the video/audio tracks now; encoding starts on publisher.start()
-        const toTimestamp = (micros) => Moq.Time.Timestamp.fromMicros(micros);
-        publisher = new MoqPublisher(videoTrack, audioTrack, broadcast, videoConfig, audioConfig, toTimestamp);
 
         connectBtn.disabled = true;
         startStreamBtn.disabled = false;

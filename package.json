@@ -22,7 +22,8 @@
     "dev:moq": "vite --config demos/moq/vite.config.ts",
     "build:moq": "vite build --config demos/moq/vite.config.ts",
     "dev": "npm run dev:player",
-    "type-check": "tsc --noEmit"
+    "type-check": "tsc --noEmit",
+    "test": "vitest run"
   },
   "repository": {
     "type": "git",
@@ -44,11 +45,13 @@
   },
   "homepage": "https://www.webcodecsfundamentals.org",
   "devDependencies": {
+    "@moq/hang": "^0.5.2",
     "@moq/net": "^0.4.2",
     "@types/node": "^22.10.5",
     "rollup-plugin-web-worker-loader": "^1.7.0",
     "typescript": "^5.8.3",
-    "vite": "^6.2.6"
+    "vite": "^6.2.6",
+    "vitest": "^3.2.7"
   },
   "dependencies": {
     "localforage": "^1.10.0",

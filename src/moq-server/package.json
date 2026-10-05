@@ -5,7 +5,7 @@
   "main": "index.js",
   "type": "module",
   "scripts": {
-    "subscriber": "node subscriber.js",
+    "subscriber": "node --experimental-strip-types subscriber.js",
     "publisher": "node publisher.js",
     "moq-subscriber": "node moq-subscriber.js"
   },

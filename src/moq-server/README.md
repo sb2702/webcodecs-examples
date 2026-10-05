@@ -8,7 +8,7 @@ This demo showcases how the [@moq/net](https://www.npmjs.com/package/@moq/net) p
 
 ## Overview
 
-Uhis demo uses a MoQ relay as an intermediary:
+This demo uses a MoQ relay as an intermediary:
 
 ```
 Browser (Publisher) → MoQ Relay ← Js Server (Subscriber)
@@ -30,13 +30,15 @@ Both the browser and server connect to a MoQ relay, allowing them to communicate
 - Receives encoded frames from relay
 - Writes frames to MP4 file using MediaBunny
 
-### Hang Protocol
-- **Catalog**: Sent first, contains codec info (codec string, resolution, audio config)
-- **Video Track**: Grouped by GOPs (Group of Pictures), each group starts with a keyframe
-- **Audio Track**: Each audio chunk is its own group
-- **Frame Format**: `[timestamp (8 bytes)] [chunk data]`
+### Hang format
+Media is sent in the [Hang](https://doc.moq.dev/concept/hang) format ([spec](https://doc.moq.dev/draft/moq-hang)), implemented by hand in [`src/moq/hang.ts`](../moq/hang.ts) and shared with the browser demos:
+- **Catalog** (`catalog.json`): one JSON frame per group, listing each rendition's WebCodecs decoder config (`description` is hex) with `container: { kind: "legacy" }`, plus a `clock` mapping PTS zero to wall time
+- **Video track**: one group per GoP, starting with a keyframe and ending with an empty end-of-frame marker
+- **Audio track**: each audio chunk is its own group
+- **Frame format** (legacy container): `[timestamp, QUIC varint in microseconds] [codec payload]`
+- **Broadcast name**: `server-recording.hang`
 
-More details [here](https://webcodecsfundamentals.org/patterns/live-streaming/#hang-protocol)
+More details [here](https://webcodecsfundamentals.org/patterns/live-streaming/#hang-format)
 ## Setup
 
 ### Prerequisites
@@ -49,18 +51,16 @@ npm install
 - `@moq/net` - MoQ client library (works in browser and Node.js)
 - `mediabunny` - MP4 muxing library
 - `express` - Web server for hosting the UI
-- `ws` - WebSocket polyfill for Node.js (required by `@moq/net`)
+- `ws` - WebSocket polyfill, only needed on Node versions older than 21
 
-### WebSocket Polyfill (Critical!)
+### WebSockets on the server
 
-`@moq/net` expects browser APIs, so Node.js needs a polyfill:
+Node, Bun and Deno don't have WebTransport, so `@moq/net` connects to the relay over WebSockets instead. Node 21+ and Bun have `WebSocket` built in; on older Node, polyfill it **before** importing `@moq/net`:
 
 ```javascript
 import WebSocket from 'ws';
 globalThis.WebSocket = WebSocket;
 ```
-
-This must be done **before** importing `@moq/net`.
 
 ## Usage
 
@@ -70,6 +70,8 @@ This must be done **before** importing `@moq/net`.
 npm run subscriber
 ```
 
+The recorder imports `../moq/hang.ts` directly, using Node's type stripping (Node 22.6+; on by default from Node 23.6). Set `PORT` or `BROADCAST` to override the defaults.
+
 This starts:
 - Express server on `http://localhost:3000`
 - MoQ subscriber connecting to relay
@@ -78,6 +80,8 @@ This starts:
 ### 2. Open the browser
 
 Navigate to `http://localhost:3000/upload.html`
+
+The page loads `MoqPublisher` from the published `webcodecs-examples` package. To test local changes to the library, run `npm run build` at the repo root and open `http://localhost:3000/upload.html?local` instead.
 
 ### 3. Record
 

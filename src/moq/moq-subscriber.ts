@@ -1,74 +1,89 @@
+import {
+  PRIORITY,
+  decodeFrame,
+  firstRendition,
+  videoDecoderConfig,
+  audioDecoderConfig,
+  type Catalog,
+} from './hang';
+
 export interface MoqFrame {
   timestamp: number;
   type?: 'key' | 'delta';
   data: Uint8Array;
 }
 
+// A live group can be reset mid-stream (e.g. dropped by the relay): skip to the next group
+async function readFrame(group: any): Promise<{ payload: Uint8Array } | undefined> {
+  try {
+    return await group.readFrame();
+  } catch (error) {
+    console.warn(`Group ${group.sequence} reset, skipping to the next group:`, (error as Error).message);
+    return undefined;
+  }
+}
+
 export class MoqSubscriber {
-  private videoTrack: any;
-  private audioTrack: any;
+  private broadcast: any;
+  private catalog: Catalog;
   private videoDecoder: VideoDecoder | null = null;
   private audioDecoder: AudioDecoder | null = null;
-  private catalog: any;
+  private subscriptions: any[] = [];
 
-  constructor(catalog: any, videoTrack: any, audioTrack: any) {
+  // `broadcast` is the @moq/net broadcast consumer the catalog came from
+  constructor(catalog: Catalog, broadcast: any) {
     this.catalog = catalog;
-    this.videoTrack = videoTrack;
-    this.audioTrack = audioTrack;
+    this.broadcast = broadcast;
+  }
+
+  // Read the latest catalog: each group holds one frame of UTF-8 JSON
+  static async getCatalog(broadcast: any): Promise<Catalog> {
+    const catalogTrack = broadcast.track('catalog.json').subscribe({ priority: PRIORITY.catalog });
+    const group = await catalogTrack.recvGroup();
+    const catalog = await group.readJson();
+    catalogTrack.close();
+    return catalog as Catalog;
   }
 
   async startVideo(onFrame: (frame: VideoFrame) => void): Promise<void> {
-    // Get video config from catalog
-    const videoRendition = Object.values(this.catalog.video.renditions)[0] as any;
+    // Pick the first rendition with a container we understand; its key is the track name
+    const selected = firstRendition(this.catalog.video?.renditions);
+    if (!selected) throw new Error('No playable video rendition in catalog');
+    const [trackName, rendition] = selected;
 
     this.videoDecoder = new VideoDecoder({
       output: onFrame,
       error: (e) => console.error('Video decoder error:', e),
     });
+    this.videoDecoder.configure(videoDecoderConfig(rendition));
 
-    const config: VideoDecoderConfig = {
-      codec: videoRendition.codec,
-      codedWidth: videoRendition.codedWidth,
-      codedHeight: videoRendition.codedHeight,
-    };
-
-    // Add description if it exists (required for AVC)
-    if (videoRendition.description) {
-      const base64 = videoRendition.description;
-      const binaryString = atob(base64);
-      const bytes = new Uint8Array(binaryString.length);
-      for (let i = 0; i < binaryString.length; i++) {
-        bytes[i] = binaryString.charCodeAt(i);
-      }
-      config.description = bytes;
-    }
-
-    this.videoDecoder.configure(config);
+    const track = this.broadcast.track(trackName).subscribe({ priority: PRIORITY.video });
+    this.subscriptions.push(track);
 
     // Start reading video frames
     (async () => {
       try {
         while (true) {
-          const group = await this.videoTrack.recvGroup();
+          const group = await track.recvGroup();
           if (!group) break;
 
-          // First frame in group is always a keyframe
+          // Each group is a GoP, so the first frame in a group is always a keyframe
           let isKeyframe = true;
 
-          // Read all frames in the group
           for (;;) {
-            const moqFrame = await group.readFrame();
+            const moqFrame = await readFrame(group);
             if (!moqFrame) break;
 
-            const frame = this.parseVideoFrame(moqFrame.payload, isKeyframe);
+            const frame = this.parseFrame(moqFrame.payload, isKeyframe);
 
-            const chunk = new EncodedVideoChunk({
+            // An empty payload marks where the previous frame ends: never decode it
+            if (frame.data.byteLength === 0) continue;
+
+            this.videoDecoder!.decode(new EncodedVideoChunk({
               timestamp: frame.timestamp,
               type: frame.type!,
               data: frame.data,
-            });
-
-            this.videoDecoder!.decode(chunk);
+            }));
             isKeyframe = false; // Subsequent frames are delta
           }
         }
@@ -79,41 +94,42 @@ export class MoqSubscriber {
   }
 
   async startAudio(onData: (audioData: AudioData) => void): Promise<void> {
-    // Get audio config from catalog
-    const audioRendition = Object.values(this.catalog.audio.renditions)[0] as any;
-
-    console.log("Starting audio")
+    const selected = firstRendition(this.catalog.audio?.renditions);
+    if (!selected) throw new Error('No playable audio rendition in catalog');
+    const [trackName, rendition] = selected;
 
     this.audioDecoder = new AudioDecoder({
       output: onData,
       error: (e) => console.error('Audio decoder error:', e),
     });
+    this.audioDecoder.configure(audioDecoderConfig(rendition));
 
-    this.audioDecoder.configure({
-      codec: audioRendition.codec,
-      sampleRate: audioRendition.sampleRate,
-      numberOfChannels: audioRendition.numberOfChannels,
-    });
+    const track = this.broadcast.track(trackName).subscribe({ priority: PRIORITY.audio });
+    this.subscriptions.push(track);
 
     // Start reading audio frames
     (async () => {
       try {
         while (true) {
-
-          const group = await this.audioTrack.recvGroup();
+          const group = await track.recvGroup();
           if (!group) break;
 
-          const moqFrame = await group.readFrame();
-          if (!moqFrame) continue;
-          const frame = this.parseAudioFrame(moqFrame.payload);
+          // Every audio frame is a keyframe, and a group may hold one or many of them
+          for (;;) {
+            const moqFrame = await readFrame(group);
+            if (!moqFrame) break;
 
-          const chunk = new EncodedAudioChunk({
-            timestamp: frame.timestamp,
-            type: 'key',
-            data: frame.data,
-          });
+            const frame = this.parseFrame(moqFrame.payload, true);
 
-          this.audioDecoder!.decode(chunk);
+            // An empty payload marks the end of the source audio: never decode it
+            if (frame.data.byteLength === 0) continue;
+
+            this.audioDecoder!.decode(new EncodedAudioChunk({
+              timestamp: frame.timestamp,
+              type: 'key',
+              data: frame.data,
+            }));
+          }
         }
       } catch (error) {
         console.error('Audio read error:', error);
@@ -121,28 +137,16 @@ export class MoqSubscriber {
     })();
   }
 
-  private parseVideoFrame(buffer: Uint8Array, isKeyframe: boolean): MoqFrame {
-    // Hang format: [timestamp (8 bytes)] [data]
-    const view = new DataView(buffer.buffer, buffer.byteOffset);
-
-    const timestamp = Number(view.getBigUint64(0, true));
-    const type = isKeyframe ? 'key' : 'delta';
-    const data = buffer.slice(8);
-
-    return { timestamp, type, data };
-  }
-
-  private parseAudioFrame(buffer: Uint8Array): MoqFrame {
-    // Hang format: [timestamp (8 bytes)] [data]
-    const view = new DataView(buffer.buffer, buffer.byteOffset);
-
-    const timestamp = Number(view.getBigUint64(0, true));
-    const data = buffer.slice(8);
-
-    return { timestamp, data };
+  // Hang legacy container: [timestamp varint (microseconds)] [codec payload]
+  private parseFrame(buffer: Uint8Array, isKeyframe: boolean): MoqFrame {
+    const { timestamp, data } = decodeFrame(buffer);
+    return { timestamp, type: isKeyframe ? 'key' : 'delta', data };
   }
 
   stop(): void {
+    for (const track of this.subscriptions) track.close();
+    this.subscriptions = [];
+
     if (this.videoDecoder && this.videoDecoder.state !== 'closed') {
       this.videoDecoder.close();
     }

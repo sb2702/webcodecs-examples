@@ -1,17 +1,26 @@
-import { MediaStreamTrackProcessor, getSampleRate } from 'webcodecs-utils';
+import { MediaStreamTrackProcessor } from 'webcodecs-utils';
 import { VideoEncoderStream } from './video-encoder-stream';
 import { AudioEncoderStream } from './audio-encoder-stream';
+import {
+  CATALOG_TRACK, VIDEO_TRACK, AUDIO_TRACK, PRIORITY,
+  catalogTrackInfo, mediaTrackInfo, videoRendition, audioRendition, wallClock, MediaClock, anchorClock, type Catalog,
+} from './hang';
+import { createVideoWriter, createAudioWriter } from './hang-writers';
+
+export { VIDEO_TRACK, AUDIO_TRACK };
 
 export class MoqPublisher {
   private videoTrack: MediaStreamTrack;
   private audioTrack: MediaStreamTrack;
-  private broadcast: any;
   private videoConfig: VideoEncoderConfig;
   private audioConfig: AudioEncoderConfig;
   private toTimestamp: (micros: number) => any;
+  readonly catalogMoqTrack: any;
   private videoMoqTrack: any;
   private audioMoqTrack: any;
   private abortController: AbortController | null = null;
+  videoFrameCount = 0;
+  audioFrameCount = 0;
 
   constructor(
     videoTrack: MediaStreamTrack,
@@ -24,17 +33,18 @@ export class MoqPublisher {
   ) {
     this.videoTrack = videoTrack;
     this.audioTrack = audioTrack;
-    this.broadcast = broadcast;
     this.videoConfig = videoConfig;
     this.audioConfig = audioConfig;
     this.toTimestamp = toTimestamp;
 
     // Create tracks up front: @moq/net refuses a subscribe to a track that doesn't exist yet
-    this.videoMoqTrack = broadcast.createTrack('video');
-    this.audioMoqTrack = broadcast.createTrack('audio');
+    this.catalogMoqTrack = broadcast.createTrack(CATALOG_TRACK, catalogTrackInfo());
+    this.videoMoqTrack = broadcast.createTrack(VIDEO_TRACK, mediaTrackInfo(PRIORITY.video));
+    this.audioMoqTrack = broadcast.createTrack(AUDIO_TRACK, mediaTrackInfo(PRIORITY.audio));
   }
 
-  static async getDescription(videoTrack: MediaStreamTrack, config: VideoEncoderConfig): Promise<string> {
+  // Encode one frame to read the encoder's decoderConfig.description (avcC for H.264, none for VP8/VP9)
+  static async getDescription(videoTrack: MediaStreamTrack, config: VideoEncoderConfig): Promise<Uint8Array | undefined> {
     const processor = new MediaStreamTrackProcessor({ track: videoTrack });
     const reader = processor.readable.getReader();
 
@@ -43,24 +53,19 @@ export class MoqPublisher {
     reader.releaseLock();
 
     if (!frame) {
-      return '';
+      return undefined;
     }
 
     // Encode the frame to get metadata
     return new Promise((resolve) => {
       const encoder = new VideoEncoder({
         output: (chunk, meta) => {
-          if (meta?.decoderConfig?.description) {
-            const description = new Uint8Array(meta.decoderConfig.description);
-            const base64 = btoa(String.fromCharCode(...description));
-            resolve(base64);
-          } else {
-            resolve(''); // VP8/VP9 don't have description
-          }
+          const description = meta?.decoderConfig?.description;
+          resolve(description ? new Uint8Array(description as ArrayBuffer) : undefined);
         },
         error: (e) => {
           console.error('Test encoder error:', e);
-          resolve('');
+          resolve(undefined);
         },
       });
 
@@ -73,6 +78,21 @@ export class MoqPublisher {
     });
   }
 
+  // Publish the Hang catalog: one group holding one frame of UTF-8 JSON
+  publishCatalog(videoDescription?: Uint8Array): Catalog {
+    const catalog: Catalog = {
+      clock: wallClock(),
+      video: { renditions: { [VIDEO_TRACK]: videoRendition(this.videoConfig, videoDescription) } },
+      audio: { renditions: { [AUDIO_TRACK]: audioRendition(this.audioConfig) } },
+    };
+
+    const group = this.catalogMoqTrack.appendGroup();
+    group.writeJson(catalog);
+    group.close();
+
+    return catalog;
+  }
+
   async start(): Promise<void> {
     if (this.abortController) {
       throw new Error('Already publishing');
@@ -80,13 +100,18 @@ export class MoqPublisher {
 
     this.abortController = new AbortController();
 
+    // Each track has its own clock: Chrome stamps camera and microphone frames on different clocks
+    const videoClock = new MediaClock();
+    const audioClock = new MediaClock();
+
     // Video pipeline
     const videoProcessor = new MediaStreamTrackProcessor({ track: this.videoTrack });
     const videoEncoderStream = new VideoEncoderStream(this.videoConfig);
 
     videoProcessor.readable
+      .pipeThrough(anchorClock<VideoFrame>(videoClock))
       .pipeThrough(videoEncoderStream)
-      .pipeTo(this.createVideoWriter(this.videoMoqTrack), {
+      .pipeTo(createVideoWriter(this.videoMoqTrack, this.toTimestamp, () => this.videoFrameCount++, (ts) => videoClock.toPts(ts)), {
         signal: this.abortController.signal
       });
 
@@ -95,77 +120,11 @@ export class MoqPublisher {
     const audioEncoderStream = new AudioEncoderStream(this.audioConfig);
 
     audioProcessor.readable
+      .pipeThrough(anchorClock<AudioData>(audioClock))
       .pipeThrough(audioEncoderStream)
-      .pipeTo(this.createAudioWriter(this.audioMoqTrack), {
+      .pipeTo(createAudioWriter(this.audioMoqTrack, this.toTimestamp, () => this.audioFrameCount++, (ts) => audioClock.toPts(ts)), {
         signal: this.abortController.signal
       });
-  }
-
-  private createVideoWriter(moqTrack: any): WritableStream<{ chunk: EncodedVideoChunk; meta: EncodedVideoChunkMetadata }> {
-    const toTimestamp = this.toTimestamp;
-    let currentGroup: any = null;
-
-    return new WritableStream({
-      async write(value) {
-        // Start new group on keyframe (GOP - group of pictures)
-        if (value.chunk.type === 'key') {
-          if (currentGroup) {
-            currentGroup.close();
-          }
-          currentGroup = moqTrack.appendGroup();
-        }
-
-        if (!currentGroup) {
-          // First chunk must be a keyframe
-          currentGroup = moqTrack.appendGroup();
-        }
-
-        // Hang format: [timestamp (8 bytes)] [data]
-        const chunkData = new Uint8Array(value.chunk.byteLength);
-        value.chunk.copyTo(chunkData);
-
-        const buffer = new Uint8Array(8 + chunkData.byteLength);
-        const view = new DataView(buffer.buffer);
-
-        // Write timestamp as 64-bit integer (microseconds)
-        view.setBigUint64(0, BigInt(value.chunk.timestamp), true);
-
-        // Write chunk data
-        buffer.set(chunkData, 8);
-
-        currentGroup.writeFrame({ payload: buffer, timestamp: toTimestamp(value.chunk.timestamp) });
-      },
-      async close() {
-        if (currentGroup) {
-          currentGroup.close();
-        }
-      }
-    });
-  }
-
-  private createAudioWriter(moqTrack: any): WritableStream<EncodedAudioChunk> {
-    const toTimestamp = this.toTimestamp;
-    return new WritableStream({
-      async write(chunk) {
-        const group = moqTrack.appendGroup();
-
-        // Hang format: [timestamp (8 bytes)] [data]
-        const chunkData = new Uint8Array(chunk.byteLength);
-        chunk.copyTo(chunkData);
-
-        const buffer = new Uint8Array(8 + chunkData.byteLength);
-        const view = new DataView(buffer.buffer);
-
-        // Write timestamp as 64-bit integer (microseconds)
-        view.setBigUint64(0, BigInt(chunk.timestamp), true);
-
-        // Write chunk data
-        buffer.set(chunkData, 8);
-
-        group.writeFrame({ payload: buffer, timestamp: toTimestamp(chunk.timestamp) });
-        group.close();
-      }
-    });
   }
 
   stop(): void {
