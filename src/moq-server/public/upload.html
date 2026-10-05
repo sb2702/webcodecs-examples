@@ -224,7 +224,7 @@
   </div>
 
   <script type="module">
-    import * as Moq from 'https://esm.sh/@moq/lite';
+    import * as Moq from 'https://esm.sh/@moq/net@0.4.2';
     import { MoqPublisher } from './moq-publisher.js';
     import { getSampleRate, getBitrate, getCodecString } from 'https://cdn.jsdelivr.net/npm/webcodecs-examples@0.1.14/dist/index.js';
 
@@ -251,7 +251,7 @@
     let startTime = 0;
     let statsInterval = null;
 
-    const RELAY_URL = 'https://usc.cdn.moq.dev/anon';
+    const RELAY_URL = 'https://cdn.moq.dev/anon';
     const BROADCAST_NAME = 'server-recording';
 
     function log(message, type = 'info') {
@@ -313,9 +313,10 @@
       try {
         updatePublisherStatus('Connecting to MoQ relay...', 'info');
 
-        connection = await Moq.Connection.connect(new URL(RELAY_URL));
-        broadcast = new Moq.Broadcast();
-        connection.publish(BROADCAST_NAME, broadcast);
+        const origin = new Moq.Origin.Producer();
+        connection = await Moq.Connection.connect({ url: new URL(RELAY_URL), publish: origin.consume() });
+        broadcast = origin.createBroadcast(Moq.Path.from(BROADCAST_NAME));
+        broadcast.announce();
 
         updatePublisherStatus('Connected to relay', 'success');
         updateServerStatus('Waiting for server...', 'info');
@@ -369,28 +370,24 @@
           }
         };
 
-        // Handle catalog requests
-        (async () => {
-          while (true) {
-            const trackRequest = await broadcast.requested();
-            const requestedTrack = trackRequest.track;
+        // Publish the catalog as a single group, retained for an hour so the server can fetch it any time
+        const catalogTrack = broadcast.createTrack('catalog.json', { maxAge: Moq.Time.Milli(60 * 60 * 1000) });
+        const catalogGroup = catalogTrack.appendGroup();
+        catalogGroup.writeJson(catalogData);
+        catalogGroup.close();
+        log('Published catalog', 'success');
 
-            log(`Track requested: ${requestedTrack.name}`, 'info');
-
-            if (requestedTrack.name === 'catalog.json') {
-              const catalogJson = JSON.stringify(catalogData);
-              const group = requestedTrack.appendGroup();
-              group.writeString(catalogJson);
-              group.close();
-              log('Sent catalog to server', 'success');
-              updateServerStatus('Server connected', 'success');
-              break
-            }
+        // The server subscribing to the catalog is our signal that it's connected
+        catalogTrack.used.subscribe((used) => {
+          if (used) {
+            log('Server subscribed to catalog', 'success');
+            updateServerStatus('Server connected', 'success');
           }
-        })();
+        });
 
-        // Start MoQ publisher with configs
-        publisher = new MoqPublisher(videoTrack, audioTrack, broadcast, videoConfig, audioConfig);
+        // Creates the video/audio tracks now; encoding starts on publisher.start()
+        const toTimestamp = (micros) => Moq.Time.Timestamp.fromMicros(micros);
+        publisher = new MoqPublisher(videoTrack, audioTrack, broadcast, videoConfig, audioConfig, toTimestamp);
 
         connectBtn.disabled = true;
         startStreamBtn.disabled = false;

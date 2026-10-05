@@ -144,7 +144,7 @@
     document.getElementById('broadcastName').value = initialBroadcast;
 
     // Update iframes with initial broadcast name
-    const relay = 'https://interop-relay.cloudflare.mediaoverquic.com:443';
+    const relay = new URLSearchParams(window.location.search).get('relay') || 'https://cdn.moq.dev/anon';
     const initialTrack = document.getElementById('trackName').value;
     const initialParams = `relay=${encodeURIComponent(relay)}&broadcast=${encodeURIComponent(initialBroadcast)}&track=${encodeURIComponent(initialTrack)}`;
     document.getElementById('publisherFrame').src = `publisher.html?${initialParams}`;

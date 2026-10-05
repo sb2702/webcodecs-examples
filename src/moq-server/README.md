@@ -1,6 +1,6 @@
 # Browser-to-Server Recording with MoQ
 
-This demo showcases how the [@moq/lite](https://www.npmjs.com/package/@moq/lite) package can be used in server environments, specifically to record webcam video from a browser to a Node/Bun/Deno server using **Media over QUIC (MoQ)** as the transport layer.
+This demo showcases how the [@moq/net](https://www.npmjs.com/package/@moq/net) package can be used in server environments, specifically to record webcam video from a browser to a Node/Bun/Deno server using **Media over QUIC (MoQ)** as the transport layer.
 
 ![MoQ Server Demo](./moq-server-demo.png)
 
@@ -21,11 +21,11 @@ Both the browser and server connect to a MoQ relay, allowing them to communicate
 ### Browser (Publisher)
 - Captures webcam video/audio using `getUserMedia()`
 - Encodes frames with WebCodecs (H.264 video, Opus audio)
-- Publishes to MoQ relay using `@moq/lite`
+- Publishes to MoQ relay using `@moq/net`
 - Provides catalog with codec configuration
 
 ### Server (Subscriber)
-- Connects to same MoQ relay using `@moq/lite`
+- Connects to same MoQ relay using `@moq/net`
 - Subscribes to video and audio tracks
 - Receives encoded frames from relay
 - Writes frames to MP4 file using MediaBunny
@@ -46,21 +46,21 @@ npm install
 ```
 
 **Key dependencies:**
-- `@moq/lite` - MoQ client library (works in browser and Node.js)
+- `@moq/net` - MoQ client library (works in browser and Node.js)
 - `mediabunny` - MP4 muxing library
 - `express` - Web server for hosting the UI
-- `ws` - WebSocket polyfill for Node.js (required by `@moq/lite`)
+- `ws` - WebSocket polyfill for Node.js (required by `@moq/net`)
 
 ### WebSocket Polyfill (Critical!)
 
-`@moq/lite` expects browser APIs, so Node.js needs a polyfill:
+`@moq/net` expects browser APIs, so Node.js needs a polyfill:
 
 ```javascript
 import WebSocket from 'ws';
 globalThis.WebSocket = WebSocket;
 ```
 
-This must be done **before** importing `@moq/lite`.
+This must be done **before** importing `@moq/net`.
 
 ## Usage
 

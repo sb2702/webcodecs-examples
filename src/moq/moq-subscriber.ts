@@ -49,7 +49,7 @@ export class MoqSubscriber {
     (async () => {
       try {
         while (true) {
-          const group = await this.videoTrack.nextGroup();
+          const group = await this.videoTrack.recvGroup();
           if (!group) break;
 
           // First frame in group is always a keyframe
@@ -57,10 +57,10 @@ export class MoqSubscriber {
 
           // Read all frames in the group
           for (;;) {
-            const frameData = await group.readFrame();
-            if (!frameData) break;
+            const moqFrame = await group.readFrame();
+            if (!moqFrame) break;
 
-            const frame = this.parseVideoFrame(frameData, isKeyframe);
+            const frame = this.parseVideoFrame(moqFrame.payload, isKeyframe);
 
             const chunk = new EncodedVideoChunk({
               timestamp: frame.timestamp,
@@ -100,11 +100,12 @@ export class MoqSubscriber {
       try {
         while (true) {
 
-          const group = await this.audioTrack.nextGroup();
+          const group = await this.audioTrack.recvGroup();
           if (!group) break;
 
-          const frameData = await group.readFrame();
-          const frame = this.parseAudioFrame(frameData);
+          const moqFrame = await group.readFrame();
+          if (!moqFrame) continue;
+          const frame = this.parseAudioFrame(moqFrame.payload);
 
           const chunk = new EncodedAudioChunk({
             timestamp: frame.timestamp,

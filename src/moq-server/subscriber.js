@@ -1,5 +1,5 @@
 import express from 'express';
-import * as Moq from '@moq/lite';
+import * as Moq from '@moq/net';
 import { Output, EncodedPacket, EncodedVideoPacketSource, EncodedAudioPacketSource, FilePathTarget, Mp4OutputFormat } from 'mediabunny';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
@@ -23,7 +23,7 @@ app.use(express.static(join(__dirname, 'public'), {
 
 const PORT = 3000;
 const RECORDINGS_DIR = join(__dirname, 'recordings');
-const RELAY_URL = 'https://usc.cdn.moq.dev/anon';
+const RELAY_URL = 'https://cdn.moq.dev/anon';
 const BROADCAST_NAME = 'server-recording';
 
 // Ensure recordings directory exists
@@ -65,23 +65,27 @@ function parseAudioFrame(buffer) {
 }
 
 /**
+ * Resolves once the browser has announced the broadcast on the relay. Without
+ * `announced: true` the request resolves blindly, and subscribing before the
+ * publisher announces is reset with code 54 (Unroutable)
+ */
+async function waitForBroadcast(request) {
+  let active = request.active.peek();
+  while (!active) active = await request.active.changed();
+  return active;
+}
+
+/**
  * Get catalog from broadcast
  */
 async function getCatalog(broadcast) {
   try {
     console.log('Requesting catalog...');
-    const catalogTrack = broadcast.subscribe('catalog.json');
-
-    for (;;) {
-      const catalogGroup = await catalogTrack.nextGroup();
-
-      if (catalogGroup) {
-        const catalogJson = await catalogGroup.readString();
-        const catalogData = JSON.parse(catalogJson);
-        console.log('Received catalog');
-        return catalogData;
-      }
-    }
+    const catalogTrack = broadcast.track('catalog.json').subscribe();
+    const catalogGroup = await catalogTrack.recvGroup();
+    const catalogData = await catalogGroup.readJson();
+    console.log('Received catalog');
+    return catalogData;
   } catch (e) {
     console.error('Error getting catalog, retrying...', e.message);
     await new Promise((r) => setTimeout(r, 500));
@@ -96,11 +100,11 @@ async function startRecording(config) {
 
 
 
-  const videoTrack = await broadcast.subscribe('video');
+  const videoTrack = broadcast.track('video').subscribe();
 
 
 
-  const audioTrack = await broadcast.subscribe('audio');
+  const audioTrack = broadcast.track('audio').subscribe();
 
 
 
@@ -306,7 +310,7 @@ async function processVideoTrack(videoTrack) {
 
   try {
     while (true) {
-      const group = await videoTrack.nextGroup();
+      const group = await videoTrack.recvGroup();
       if (!group) break;
 
       // First frame in group is always a keyframe
@@ -314,10 +318,10 @@ async function processVideoTrack(videoTrack) {
 
       // Read all frames in the group
       for (;;) {
-        const frameData = await group.readFrame();
-        if (!frameData) break;
+        const moqFrame = await group.readFrame();
+        if (!moqFrame) break;
 
-        const frame = parseVideoFrame(frameData, isKeyframe);
+        const frame = parseVideoFrame(moqFrame.payload, isKeyframe);
         await handleVideoFrame(frame, isKeyframe);
 
         isKeyframe = false; // Subsequent frames are delta
@@ -347,13 +351,13 @@ async function processAudioTrack(audioTrack) {
 
   try {
     while (true) {
-      const group = await audioTrack.nextGroup();
+      const group = await audioTrack.recvGroup();
       if (!group) break;
 
-      const frameData = await group.readFrame();
-      if (!frameData) continue;
+      const moqFrame = await group.readFrame();
+      if (!moqFrame) continue;
 
-      const frame = parseAudioFrame(frameData);
+      const frame = parseAudioFrame(moqFrame.payload);
       await handleAudioFrame(frame);
     }
   } catch (error) {
@@ -367,11 +371,13 @@ async function processAudioTrack(audioTrack) {
 async function connectToMoQ() {
   try {
     console.log('Connecting to MoQ relay:', RELAY_URL);
-    moqConnection = await Moq.Connection.connect(new URL(RELAY_URL));
+    const origin = new Moq.Origin.Producer();
+    moqConnection = await Moq.Connection.connect({ url: new URL(RELAY_URL), consume: origin });
     console.log('Connected to MoQ relay');
 
-    // Consume broadcast
-    broadcast = moqConnection.consume(BROADCAST_NAME);
+    // Wait for the browser to announce the broadcast
+    console.log(`Waiting for broadcast: ${BROADCAST_NAME}`);
+    broadcast = await waitForBroadcast(origin.request(Moq.Path.from(BROADCAST_NAME), { announced: true }));
     console.log(`Consuming broadcast: ${BROADCAST_NAME}`);
 
     // Get catalog

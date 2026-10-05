@@ -44,7 +44,7 @@
   },
   "homepage": "https://www.webcodecsfundamentals.org",
   "devDependencies": {
-    "@moq/lite": "^0.1.0",
+    "@moq/net": "^0.4.2",
     "@types/node": "^22.10.5",
     "rollup-plugin-web-worker-loader": "^1.7.0",
     "typescript": "^5.8.3",

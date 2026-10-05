@@ -2,14 +2,17 @@ import { VideoEncoderStream } from './video-encoder-stream.js';
 import { AudioEncoderStream } from './audio-encoder-stream.js';
 
 export class MoqPublisher {
-  constructor(videoTrack, audioTrack, broadcast, videoConfig, audioConfig) {
+  // toTimestamp: @moq/net frames carry their own timestamp, e.g. (us) => Moq.Time.Timestamp.fromMicros(us)
+  constructor(videoTrack, audioTrack, broadcast, videoConfig, audioConfig, toTimestamp) {
     this.videoTrack = videoTrack;
     this.audioTrack = audioTrack;
     this.broadcast = broadcast;
     this.videoConfig = videoConfig;
     this.audioConfig = audioConfig;
-    this.videoMoqTrack = null;
-    this.audioMoqTrack = null;
+    this.toTimestamp = toTimestamp;
+    // Create tracks up front: @moq/net refuses a subscribe to a track that doesn't exist yet
+    this.videoMoqTrack = broadcast.createTrack('video');
+    this.audioMoqTrack = broadcast.createTrack('audio');
     this.abortController = null;
     this.videoFrameCount = 0;
     this.audioFrameCount = 0;
@@ -61,60 +64,35 @@ export class MoqPublisher {
 
     this.abortController = new AbortController();
 
-    for(;;){ // Listen for track requests
-      const trackRequest = this.broadcast.requested();
+    // Video pipeline
+    const videoProcessor = new MediaStreamTrackProcessor({ track: this.videoTrack });
+    const videoEncoderStream = new VideoEncoderStream(this.videoConfig);
 
+    videoProcessor.readable
+      .pipeThrough(videoEncoderStream)
+      .pipeTo(this.createVideoWriter(this.videoMoqTrack), {
+        signal: this.abortController.signal
+      })
+      .catch(e => {
+        if (e.name !== 'AbortError') {
+          console.error('Video pipeline error:', e);
+        }
+      });
 
-      if(trackRequest) this.handleTrackRequest(trackRequest)
+    // Audio pipeline
+    const audioProcessor = new MediaStreamTrackProcessor({ track: this.audioTrack });
+    const audioEncoderStream = new AudioEncoderStream(this.audioConfig);
 
-
-      if(this.videoMoqTrack && this.audioMoqTrack) break
-      await new Promise((r)=>requestAnimationFrame(r));
-    }
-  }
-
-  async handleTrackRequest(trackRequestPromise){
-    const trackRequest = await trackRequestPromise;
-    const requestedTrack = trackRequest.track;
-
-    console.log("Handling track request", requestedTrack)
-    if (requestedTrack.name === 'video' && !this.videoMoqTrack) {
-      this.videoMoqTrack = requestedTrack;
-
-      // Video pipeline
-      const videoProcessor = new MediaStreamTrackProcessor({ track: this.videoTrack });
-      const videoEncoderStream = new VideoEncoderStream(this.videoConfig);
-
-      // Start video pipeline
-      videoProcessor.readable
-        .pipeThrough(videoEncoderStream)
-        .pipeTo(this.createVideoWriter(this.videoMoqTrack), {
-          signal: this.abortController.signal
-        })
-        .catch(e => {
-          if (e.name !== 'AbortError') {
-            console.error('Video pipeline error:', e);
-          }
-        });
-    } else if (requestedTrack.name === 'audio' && !this.audioMoqTrack) {
-      this.audioMoqTrack = requestedTrack;
-
-      // Audio pipeline
-      const audioProcessor = new MediaStreamTrackProcessor({ track: this.audioTrack });
-      const audioEncoderStream = new AudioEncoderStream(this.audioConfig);
-
-      // Start audio pipeline
-      audioProcessor.readable
-        .pipeThrough(audioEncoderStream)
-        .pipeTo(this.createAudioWriter(this.audioMoqTrack), {
-          signal: this.abortController.signal
-        })
-        .catch(e => {
-          if (e.name !== 'AbortError') {
-            console.error('Audio pipeline error:', e);
-          }
-        });
-    }
+    audioProcessor.readable
+      .pipeThrough(audioEncoderStream)
+      .pipeTo(this.createAudioWriter(this.audioMoqTrack), {
+        signal: this.abortController.signal
+      })
+      .catch(e => {
+        if (e.name !== 'AbortError') {
+          console.error('Audio pipeline error:', e);
+        }
+      });
   }
 
   createVideoWriter(moqTrack) {
@@ -149,7 +127,7 @@ export class MoqPublisher {
         // Write chunk data
         buffer.set(chunkData, 8);
 
-        currentGroup.writeFrame(buffer);
+        currentGroup.writeFrame({ payload: buffer, timestamp: self.toTimestamp(value.chunk.timestamp) });
         self.videoFrameCount++;
       },
       async close() {
@@ -180,7 +158,7 @@ export class MoqPublisher {
         // Write chunk data
         buffer.set(chunkData, 8);
 
-        group.writeFrame(buffer);
+        group.writeFrame({ payload: buffer, timestamp: self.toTimestamp(chunk.timestamp) });
         group.close();
         self.audioFrameCount++;
       }
